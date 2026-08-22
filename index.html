@@ -1408,102 +1408,81 @@
 
     let whitelist = loadWhitelist();
 
-    // ===== 白名单/常用词查找缓存 =====
-    // isInWhitelist、getCommonWords 原来每次调用都会对整个数组做线性扫描 /
-    // 重新构建 Set，OCR 识别时会被每个单词反复调用，属于明显的性能瓶颈。
-    // 这里维护缓存，只有白名单变化时才失效重建，查找从 O(n) 降为 O(1)。
-    let whitelistSetCache = null;
-    let commonWordsSetCache = null;
-    let baseCommonWordsSetCache = null;
-
-    function invalidateWordCaches() {
-        whitelistSetCache = null;
-        commonWordsSetCache = null;
-    }
-
-    function getWhitelistSet() {
-        if (!whitelistSetCache) {
-            whitelistSetCache = new Set(whitelist.map(w => w.toLowerCase()));
-        }
-        return whitelistSetCache;
-    }
-
     function isInWhitelist(word) {
         if (!word) return false;
         const lower = word.toLowerCase().replace(/[^a-z']/g, '');
-        const set = getWhitelistSet();
-        if (set.has(lower)) return true;
+        if (whitelist.some(w => w.toLowerCase() === lower)) return true;
         if (lower.endsWith('s')) {
             const base = lower.slice(0, -1);
-            if (set.has(base)) return true;
+            if (whitelist.some(w => w.toLowerCase() === base)) return true;
             if (lower.endsWith('es')) {
                 const baseEs = lower.slice(0, -2);
-                if (set.has(baseEs)) return true;
+                if (whitelist.some(w => w.toLowerCase() === baseEs)) return true;
             }
             if (lower.endsWith('ies')) {
                 const baseIes = lower.slice(0, -3) + 'y';
-                if (set.has(baseIes)) return true;
+                if (whitelist.some(w => w.toLowerCase() === baseIes)) return true;
             }
         }
         if (lower.endsWith('ed')) {
             const base = lower.slice(0, -2);
-            if (set.has(base)) return true;
+            if (whitelist.some(w => w.toLowerCase() === base)) return true;
             if (lower.length > 3 && /[bcdfghjklmnpqrstvwxyz]{2}ed$/.test(lower)) {
                 const baseDouble = lower.slice(0, -3);
-                if (set.has(baseDouble)) return true;
+                if (whitelist.some(w => w.toLowerCase() === baseDouble)) return true;
             }
         }
         if (lower.endsWith('ing')) {
             const base = lower.slice(0, -3);
-            if (set.has(base)) return true;
+            if (whitelist.some(w => w.toLowerCase() === base)) return true;
             if (lower.length > 4 && lower.endsWith('ing')) {
                 const baseE = lower.slice(0, -3) + 'e';
-                if (set.has(baseE)) return true;
+                if (whitelist.some(w => w.toLowerCase() === baseE)) return true;
             }
             if (lower.length > 4 && /[bcdfghjklmnpqrstvwxyz]{2}ing$/.test(lower)) {
                 const baseDouble = lower.slice(0, -4);
-                if (set.has(baseDouble)) return true;
+                if (whitelist.some(w => w.toLowerCase() === baseDouble)) return true;
             }
         }
         if (lower.endsWith('er')) {
             const base = lower.slice(0, -2);
-            if (set.has(base)) return true;
+            if (whitelist.some(w => w.toLowerCase() === base)) return true;
             if (lower.length > 3 && /[bcdfghjklmnpqrstvwxyz]{2}er$/.test(lower)) {
                 const baseDouble = lower.slice(0, -3);
-                if (set.has(baseDouble)) return true;
+                if (whitelist.some(w => w.toLowerCase() === baseDouble)) return true;
             }
         }
         if (lower.endsWith('est')) {
             const base = lower.slice(0, -3);
-            if (set.has(base)) return true;
+            if (whitelist.some(w => w.toLowerCase() === base)) return true;
             if (lower.length > 4 && /[bcdfghjklmnpqrstvwxyz]{2}est$/.test(lower)) {
                 const baseDouble = lower.slice(0, -4);
-                if (set.has(baseDouble)) return true;
+                if (whitelist.some(w => w.toLowerCase() === baseDouble)) return true;
             }
         }
         if (lower.endsWith('ly')) {
             const base = lower.slice(0, -2);
-            if (set.has(base)) return true;
+            if (whitelist.some(w => w.toLowerCase() === base)) return true;
             if (lower.endsWith('ally')) {
                 const baseAlly = lower.slice(0, -4);
-                if (set.has(baseAlly)) return true;
+                if (whitelist.some(w => w.toLowerCase() === baseAlly)) return true;
             }
         }
         if (lower.endsWith('ness')) {
             const base = lower.slice(0, -4);
-            if (set.has(base)) return true;
+            if (whitelist.some(w => w.toLowerCase() === base)) return true;
             if (lower.endsWith('iness')) {
                 const baseIness = lower.slice(0, -5) + 'y';
-                if (set.has(baseIness)) return true;
+                if (whitelist.some(w => w.toLowerCase() === baseIness)) return true;
             }
         }
         if (lower.startsWith('un')) {
             const base = lower.slice(2);
-            if (set.has(base)) return true;
+            if (whitelist.some(w => w.toLowerCase() === base)) return true;
         }
         if (lower.startsWith('in')) {
             const base = lower.slice(2);
-            if (set.has(base)) return true;
+            if (whitelist.some(w => w.toLowerCase() === base)) return true;
         }
         return false;
     }
@@ -1523,7 +1502,6 @@
             remove.addEventListener('click', () => {
                 whitelist.splice(idx, 1);
                 saveWhitelist(whitelist);
-                invalidateWordCaches();
                 renderWhitelistTags();
             });
             tag.appendChild(remove);
@@ -1534,10 +1512,9 @@
     function addToWhitelist(word) {
         word = word.trim().toLowerCase();
         if (!word) return false;
-        if (getWhitelistSet().has(word)) return false;
+        if (whitelist.some(w => w.toLowerCase() === word)) return false;
         whitelist.push(word);
         saveWhitelist(whitelist);
-        invalidateWordCaches();
         renderWhitelistTags();
         return true;
     }
@@ -1545,7 +1522,6 @@
     function resetWhitelist() {
         whitelist = [...DEFAULT_WHITELIST];
         saveWhitelist(whitelist);
-        invalidateWordCaches();
         renderWhitelistTags();
     }
 
@@ -1554,13 +1530,22 @@
        ===================================================================== */
     const sessionSrcCache = {};
 
-    function localSrc(fileName){
-        return encodeURI('file://' + imgDir + fileName);
-    }
+    // 修改 pageSrc 函数，优先从 Base64 缓存加载图片，解决线上环境 file:// 协议被浏览器阻止的问题
     function pageSrc(page){
         if(!page) return '';
-        if(page.file) return sessionSrcCache[page.file] || localSrc(page.file);
-        return page.src || '';
+        // 1. 优先从 session 缓存 (Base64) 加载
+        if(page.file && sessionSrcCache[page.file]) {
+            return sessionSrcCache[page.file];
+        }
+        // 2. 如果页面本身有 src 属性（通常是 Base64 数据）
+        if(page.src) {
+            return page.src;
+        }
+        // 3. 最后才尝试本地文件路径（仅在本地环境有效）
+        if(page.file) {
+            return encodeURI('file://' + imgDir + page.file);
+        }
+        return '';
     }
 
     let library = [];
@@ -1745,11 +1730,58 @@
     }
 
     /* =====================================================================
-       ===== 导出 / 导入 备份 =====
+       ===== 导出 / 导入 备份（方案二：将图片数据存入备份文件） =====
        ===================================================================== */
-    function exportBackup() {
+    // 将图片转换为 Base64 数据
+    function getImageBase64(imgElement) {
+        return new Promise((resolve) => {
+            if (!imgElement) { resolve(null); return; }
+            try {
+                const canvas = document.createElement('canvas');
+                canvas.width = imgElement.naturalWidth || imgElement.width || 200;
+                canvas.height = imgElement.naturalHeight || imgElement.height || 200;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(imgElement, 0, 0);
+                resolve(canvas.toDataURL('image/jpeg', 0.85));
+            } catch(e) {
+                resolve(null);
+            }
+        });
+    }
+
+    // 增强的导出备份：包含图片 Base64 数据
+    async function exportBackup() {
+        // 收集所有需要导出的图片数据
+        const allPages = getAllPages(library);
+        const imageDataMap = {};
+
+        for (const page of allPages) {
+            if (page.file && sessionSrcCache[page.file]) {
+                // 如果缓存中有 Base64 数据，直接使用
+                imageDataMap[page.file] = sessionSrcCache[page.file];
+            } else if (page.file) {
+                // 尝试从 DOM 中获取已加载的图片
+                const imgElements = document.querySelectorAll('img');
+                for (const img of imgElements) {
+                    const src = img.getAttribute('src') || '';
+                    if (src.includes(encodeURIComponent(page.file)) || src.includes(page.file)) {
+                        const base64 = await getImageBase64(img);
+                        if (base64) {
+                            imageDataMap[page.file] = base64;
+                            break;
+                        }
+                    }
+                }
+                // 如果还没有获取到，尝试从 sessionSrcCache 中获取
+                if (!imageDataMap[page.file] && sessionSrcCache[page.file]) {
+                    imageDataMap[page.file] = sessionSrcCache[page.file];
+                }
+            }
+        }
+
+        // 构建备份数据
         const backupData = {
-            version: '1.0',
+            version: '2.0', // 版本升级，标识包含图片数据
             timestamp: new Date().toISOString(),
             imgDir: imgDir,
             tree: JSON.parse(JSON.stringify(library)),
@@ -1757,10 +1789,17 @@
             collapsed: [...collapsedNodes],
             whitelist: whitelist,
             currentStoryId: currentStoryId,
-            currentSpread: currentSpread
+            currentSpread: currentSpread,
+            imageData: imageDataMap // 新增：图片 Base64 数据
         };
 
         const jsonStr = JSON.stringify(backupData, null, 2);
+        // 如果数据太大，提示用户
+        if (jsonStr.length > 50 * 1024 * 1024) {
+            if (!confirm('备份文件较大（超过50MB），可能无法完整保存。建议分批次导出。\n\n是否继续？')) {
+                return;
+            }
+        }
         const blob = new Blob([jsonStr], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -1772,6 +1811,23 @@
         URL.revokeObjectURL(url);
     }
 
+    // 获取所有页面（递归遍历）
+    function getAllPages(nodes) {
+        const pages = [];
+        if (!nodes || !Array.isArray(nodes)) return pages;
+        for (const node of nodes) {
+            if (node.type === 'story' && node.pages) {
+                for (const page of node.pages) {
+                    if (page.file) pages.push(page);
+                }
+            } else if (node.type === 'folder' && node.children) {
+                pages.push(...getAllPages(node.children));
+            }
+        }
+        return pages;
+    }
+
+    // 增强的导入备份：恢复图片 Base64 数据
     function importBackup(file) {
         const reader = new FileReader();
         reader.onload = function(e) {
@@ -1782,7 +1838,16 @@
                     return;
                 }
 
-                if (!confirm(`即将导入备份数据，将覆盖当前所有绘本目录及页面文本。\n备份时间：${backupData.timestamp || '未知'}\n绘本数：${getAllStories(backupData.tree).length}\n\n确定要继续吗？`)) {
+                // 检查版本，提示用户
+                const isV2 = backupData.version === '2.0' || backupData.imageData;
+                if (!isV2) {
+                    if (!confirm('此备份文件为旧版本（不含图片数据），导入后图片可能无法显示。\n\n建议使用新版导出的备份文件。\n\n是否继续导入？')) {
+                        return;
+                    }
+                }
+
+                const totalStories = getAllStories(backupData.tree).length;
+                if (!confirm(`即将导入备份数据，将覆盖当前所有绘本目录及页面文本。\n备份时间：${backupData.timestamp || '未知'}\n绘本数：${totalStories}\n${isV2 ? '✅ 包含图片数据' : '⚠️ 不含图片数据'}\n\n确定要继续吗？`)) {
                     return;
                 }
 
@@ -1821,9 +1886,27 @@
                 }
                 if (currentStoryId) localStorage.setItem('wib:currentStoryId', currentStoryId);
 
+                // 恢复图片数据到 sessionSrcCache
+                if (backupData.imageData && typeof backupData.imageData === 'object') {
+                    Object.keys(backupData.imageData).forEach(key => {
+                        sessionSrcCache[key] = backupData.imageData[key];
+                    });
+                    // 将图片数据也保存到 localStorage 中，以便持久化
+                    try {
+                        localStorage.setItem('wib:imageCache', JSON.stringify(backupData.imageData));
+                    } catch(e) {
+                        console.warn('图片数据较大，无法全部存入 localStorage，将在会话中保留');
+                    }
+                }
+
+                // 如果是旧版本，尝试从本地路径加载图片（兼容旧版）
+                if (!backupData.imageData) {
+                    alert('⚠️ 此备份文件为旧版本，不含图片数据。\n\n请确保图片目录设置正确，否则图片将无法显示。');
+                }
+
                 saveLibrary();
                 renderAll(true);
-                alert('✅ 备份导入成功！\n\n绘本目录及页面文本已恢复。\n图片目录已更新为：' + imgDir);
+                alert(`✅ 备份导入成功！\n\n绘本目录及页面文本已恢复。\n${backupData.imageData ? '✅ 图片数据已恢复' : '⚠️ 请手动设置图片目录'}\n图片目录已更新为：${imgDir}`);
             } catch(err) {
                 alert('❌ 导入失败：备份文件格式无效\n\n错误信息：' + err.message);
                 console.error(err);
@@ -1834,6 +1917,22 @@
         };
         reader.readAsText(file);
     }
+
+    // 在页面加载时尝试恢复图片缓存
+    function restoreImageCache() {
+        try {
+            const cached = localStorage.getItem('wib:imageCache');
+            if (cached) {
+                const data = JSON.parse(cached);
+                if (typeof data === 'object') {
+                    Object.keys(data).forEach(key => {
+                        sessionSrcCache[key] = data[key];
+                    });
+                }
+            }
+        } catch(e) {}
+    }
+    restoreImageCache();
 
     /* =====================================================================
        ===== 解析文件名 =====
@@ -2646,13 +2745,25 @@
         const imgBox = document.createElement('div');
         imgBox.className = 'page-img-box';
         const img = document.createElement('img');
-        img.src = pageSrc(page);
+        // 使用优化后的 pageSrc 函数加载图片
+        const imgSrc = pageSrc(page);
+        if (imgSrc) {
+            img.src = imgSrc;
+        } else {
+            // 如果没有图片源，显示占位提示
+            img.alt = '图片未找到';
+            img.style.display = 'none';
+            const miss = document.createElement('div');
+            miss.className = 'missing-img';
+            miss.textContent = '⚠️ 未找到图片：' + (page.file || '未知文件');
+            imgBox.appendChild(miss);
+        }
         img.alt = page.text || ('第 ' + (globalIndex+1) + ' 页');
         img.addEventListener('error', ()=>{
             if(imgBox.querySelector('.missing-img')) return;
             const miss = document.createElement('div');
             miss.className = 'missing-img';
-            miss.textContent = '⚠️ 未找到图片：' + imgDir + (page.file || '');
+            miss.textContent = '⚠️ 图片加载失败：' + imgDir + (page.file || '');
             imgBox.appendChild(miss);
         });
         imgBox.appendChild(img);
@@ -3084,18 +3195,8 @@
     const previewImage = document.getElementById('previewImage');
 
     let pendingItems = [];
+    let ocrWorker = null;
     let pendingIdSeq = 0;
-
-    // ===== OCR 并发工作池 =====
-    // 原实现只创建 1 个 Tesseract worker，"并发识别"实际是多个 async 循环
-    // 反复调用同一个 worker 的 recognize()——Tesseract.js 单个 worker 对应
-    // 一个独立线程，同一 worker 上的识别请求会被排队串行执行，并不会真正
-    // 并行。这里改为创建一个真正的多 worker 池（每个 worker 独立线程），
-    // 按 CPU 核心数确定池大小，多张图片可以被不同线程同时识别，
-    // 显著提升批量导入 / 批量识别的速度。
-    const OCR_POOL_SIZE = Math.min(6, Math.max(2, (navigator.hardwareConcurrency || 4) - 1));
-    let ocrWorkerPool = [];
-    let ocrPoolInitPromise = null;
 
     const BASE_COMMON_WORDS = [
         'a','an','oh','ok','okay','the','of','to','for','with','on','at','from','by','in','into','through','during',
@@ -3125,81 +3226,9 @@
     ];
 
     function getCommonWords() {
-        if (!commonWordsSetCache) {
-            if (!baseCommonWordsSetCache) baseCommonWordsSetCache = new Set(BASE_COMMON_WORDS);
-            const words = new Set(baseCommonWordsSetCache);
-            whitelist.forEach(w => words.add(w.toLowerCase()));
-            commonWordsSetCache = words;
-        }
-        return commonWordsSetCache;
-    }
-
-    // ===== 单词有效性判断 =====
-    // 目的：只把"肉眼可见、明显是英文单词"的文本保留下来，过滤 OCR 在插画/
-    // 背景图案上产生的随机字母乱码。相比"长度>=3 就算有效词"的粗略规则，这里
-    // 综合白名单、常见词表、常见词根/词缀、字母组合频率、大小写模式、字符
-    // 多样性、元音辅音分布等多重启发式规则来判断，默认情况下"不认识的怪异
-    // 字母组合"一律判定为无效（宁可漏识别，也不把乱码当成文字收录）。
-    function isMeaningfulWord(word) {
-        const clean = word.replace(/[^A-Za-z']/g, '');
-        if (clean.length < 1) return false;
-
-        if (isInWhitelist(word)) return true;
-
-        const lower = clean.toLowerCase();
-        const commonWords = getCommonWords();
-
-        if (clean.length === 1 && ['a', 'i', 'o'].includes(lower)) return true;
-        if (commonWords.has(lower)) return true;
-
-        if (word.includes("'") && clean.length >= 3) {
-            const parts = word.split("'");
-            if (parts.length === 2) {
-                const prefix = parts[0].toLowerCase();
-                const commonPrefixes = ['it', 'he', 'she', 'we', 'they', 'you', 'i', 'don', 'can', 'won', 'should', 'would', 'could', 'might', 'must', 'shan', 'is', 'are', 'was', 'were', 'have', 'has', 'had', 'let', 'ma'];
-                if (commonPrefixes.includes(prefix)) return true;
-            }
-        }
-
-        // 常见词根/词缀：要求词干本身也有一定长度，避免"xxing"这类噪音误判
-        const commonRoots = ['ing', 'ion', 'tion', 'ment', 'ness', 'ful', 'less', 'ly', 'er', 'or', 'ist', 'ism', 'able', 'ible', 'ous', 'al', 'ic', 'ive', 'ative', 'itive', 'ed', 'en', 'es', 'ies'];
-        for (let root of commonRoots) {
-            if (lower.length >= root.length + 2 && lower.endsWith(root)) return true;
-        }
-
-        // 规范的首字母大写形式（专有名词），但要求其余字母均为小写，
-        // 避免"TIhs"这类大小写混杂的乱码被误判为专有名词
-        if (/^[A-Z][a-z']*$/.test(word) && clean.length >= 2) return true;
-
-        const commonPairs = ['th', 'he', 'in', 'er', 'an', 're', 'on', 'at', 'en', 'nd', 'st', 'or', 'ti', 'es', 'ou', 'ed', 'is', 'it', 'al', 'ar', 've', 'un', 'as', 'ng', 'se', 'le', 'ea', 'me', 'de', 'hi', 'lo', 'ma', 'pa', 'ra', 'ta', 'wh', 'go', 'do', 'am', 'we', 'ur', 'ri', 'li', 'ca', 'co', 'di', 'mi', 'ni', 'pi', 'si', 'vi', 'xi', 'ya', 'yo', 'za', 'ch', 'sh', 'ph', 'ck', 'll', 'ss', 'ee', 'oo', 'tt', 'pp', 'rr', 'nn', 'mm', 'bb', 'gg', 'dd'];
-        let pairCount = 0;
-        for (let i = 0; i < lower.length - 1; i++) {
-            const pair = lower.substring(i, i + 2);
-            if (commonPairs.includes(pair)) {
-                pairCount++;
-                if (pairCount >= 2) return true;
-            }
-        }
-
-        const uniqueChars = new Set(clean.toLowerCase().split(''));
-        const diversity = uniqueChars.size / clean.length;
-        if (diversity < 0.3) return false;
-        if (diversity > 0.95 && clean.length > 4) return false;
-
-        const vowels = new Set(['a', 'e', 'i', 'o', 'u', 'y']);
-        let hasVowel = false, hasConsonant = false;
-        for (let ch of lower) {
-            if (vowels.has(ch)) hasVowel = true;
-            else if (ch >= 'a' && ch <= 'z') hasConsonant = true;
-            if (hasVowel && hasConsonant) break;
-        }
-        if (!hasVowel || !hasConsonant) return false;
-
-        // 短词（<=4）在没有其它证据支持时，默认不认为是有效单词，
-        // 避免把随机组合的短字母串当成文字
-        if (clean.length <= 4) return false;
-
-        return false;
+        const words = new Set(BASE_COMMON_WORDS);
+        whitelist.forEach(w => words.add(w.toLowerCase()));
+        return words;
     }
 
     // ===== 增强的文本质量评分 =====
@@ -3226,7 +3255,7 @@
             const clean = w.replace(/[^a-zA-Z']/g, '');
             if (clean.length > 0) {
                 totalWordLength += clean.length;
-                if (isMeaningfulWord(clean) || isInWhitelist(clean)) {
+                if (commonWords.has(clean.toLowerCase()) || isInWhitelist(clean) || clean.length >= 3) {
                     validWordCount++;
                 }
             }
@@ -3251,7 +3280,7 @@
         
         const hasCommonWord = words.some(w => {
             const clean = w.replace(/[^a-zA-Z']/g, '');
-            return clean.length > 0 && (isMeaningfulWord(clean) || isInWhitelist(clean));
+            return clean.length > 0 && (commonWords.has(clean.toLowerCase()) || isInWhitelist(clean));
         });
         if (hasCommonWord) score += 20;
         
@@ -3262,22 +3291,20 @@
     }
 
     // ===== 增强的文本清洗 - 智能过滤乱码 =====
-    // 改为整页扫描后，同一张图上可能出现多行清晰文字（不再只裁剪底部一行）。
-    // 因此不再只挑"单条最佳行"，而是逐行做严格校验，把每一行都当作独立候选，
-    // 只保留"肉眼可见、明显是英文"的行并按原始顺序拼接；任何一行只要非字母
-    // 符号过多、或有效单词占比不够、或整体质量评分不达标，都直接丢弃，
-    // 不再兜底合并未校验的原始文本，从源头避免乱码混入结果。
     function cleanOcrTextEnhanced(raw) {
         if (!raw) return '';
-
-        const lines = raw.split('\n').map(s => s.trim()).filter(s => s.length > 0);
+        
+        const lines = raw.split('\n').filter(s => s.trim().length > 0);
         if (lines.length === 0) return '';
-
-        const goodLines = [];
-
-        for (const trimmed of lines) {
+        
+        let bestLine = '';
+        let bestScore = -999;
+        const commonWords = getCommonWords();
+        
+        for (const line of lines) {
+            let trimmed = line.trim();
             if (trimmed.length < 2) continue;
-
+            
             const chars = trimmed.split('');
             let alphaCount = 0;
             let nonAlphaCount = 0;
@@ -3287,11 +3314,10 @@
                     nonAlphaCount++;
                 }
             }
-
+            
             const totalValid = alphaCount + nonAlphaCount;
-            if (totalValid > 0 && nonAlphaCount / totalValid > 0.35) continue;
-            if (alphaCount < 2) continue;
-
+            if (totalValid > 0 && nonAlphaCount / totalValid > 0.4) continue;
+            
             const words = trimmed.split(/\s+/);
             let meaningfulWords = 0;
             let totalWords = 0;
@@ -3299,27 +3325,34 @@
                 const clean = w.replace(/[^a-zA-Z']/g, '');
                 if (clean.length > 0) {
                     totalWords++;
-                    if (isMeaningfulWord(clean) || isInWhitelist(clean)) {
+                    if (commonWords.has(clean.toLowerCase()) || isInWhitelist(clean) || clean.length >= 3) {
                         meaningfulWords++;
                     }
                 }
             }
-
-            if (totalWords === 0) continue;
-            // 有效词占比门槛从 0.3 提高到 0.6：只保留明显是英文单词/句子的整行文字
-            if (meaningfulWords / totalWords < 0.6) continue;
-
+            
+            if (totalWords > 0 && meaningfulWords / totalWords < 0.3) continue;
+            
             const score = scoreTextQuality(trimmed);
-            if (score <= 0) continue;
-
-            goodLines.push(trimmed);
+            if (score > bestScore) {
+                bestScore = score;
+                bestLine = trimmed;
+            }
         }
-
-        if (goodLines.length === 0) return '';
-
-        let result = goodLines.join(' ').replace(/\s+/g, ' ').trim();
+        
+        if (!bestLine && lines.length > 0) {
+            const combined = lines.join(' ').trim();
+            const score = scoreTextQuality(combined);
+            if (score > 0) {
+                bestLine = combined;
+            }
+        }
+        
+        if (!bestLine) return '';
+        
+        let result = bestLine.replace(/\s+/g, ' ').trim();
         if (result.length > 500) result = result.slice(0, 500);
-
+        
         return result;
     }
 
@@ -3353,149 +3386,85 @@
         return ctx.getImageData(0, 0, canvas.width, canvas.height);
     }
 
-    // ===== 并发工具函数 =====
-    // 读取文件 (FileReader) 和图片解码是异步 I/O，原实现用 for 循环逐个 await，
-    // 完全串行等待，没有利用浏览器可以同时处理多个文件读取/解码的能力。
-    // 这里提供一个有限并发的通用 map 工具：结果按原始下标写回，保证顺序
-    // 和原来完全一致，只是让多个文件的读取/解码可以同时进行，从而提速。
-    async function mapWithConcurrency(items, limit, fn) {
-        const results = new Array(items.length);
-        let index = 0;
-        async function lane() {
-            while (index < items.length) {
-                const i = index++;
-                results[i] = await fn(items[i], i);
-            }
-        }
-        const laneCount = Math.min(limit, items.length) || 1;
-        const lanes = [];
-        for (let i = 0; i < laneCount; i++) lanes.push(lane());
-        await Promise.all(lanes);
-        return results;
-    }
-
-    function readFileAsDataUrl(file) {
-        return new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onload = (e) => resolve(e.target.result);
-            reader.readAsDataURL(file);
-        });
-    }
-
-    // 读取单个文件 + 解码 + 灰度检测，返回统一结构；失败时抛出错误，
-    // 由调用方按原有逻辑处理（保持原有的失败日志/进度更新行为不变）。
-    async function readAndAnalyzeFile(file) {
-        const dataUrl = await readFileAsDataUrl(file);
-        const img = await loadImageEl(dataUrl);
-        const imageData = await getImageData(img);
-        const isGray = isGrayscaleImage(imageData);
-        return { file, dataUrl, isGray };
-    }
-
-    const FILE_READ_CONCURRENCY = Math.min(8, Math.max(4, (navigator.hardwareConcurrency || 4)));
-
-    async function createOneOcrWorker() {
-        const worker = await Tesseract.createWorker('eng');
-        await worker.setParameters({
-            // 识别范围改为整张图片后，文字可能出现在图片任意位置，且被插画
-            // 分隔，不再是单一规整的文本块，因此页面分割模式从"6-统一文本块"
-            // 改为"11-稀疏文本"，更适合在整页图片中定位分散的文字。
-            tessedit_pageseg_mode: '11',
+    async function getOcrWorker() {
+        if (ocrWorker) return ocrWorker;
+        ocrStatusText.textContent = '正在准备文字识别引擎（首次使用需下载英文语言包，请稍候）…';
+        ocrWorker = await Tesseract.createWorker('eng');
+        await ocrWorker.setParameters({
+            tessedit_pageseg_mode: '6',
             tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,'!?-" + '"',
-            tessedit_ocr_engine_mode: '2',
-            preserve_interword_spaces: '1'
+            tessedit_ocr_engine_mode: '2'
         });
-        return worker;
+        return ocrWorker;
     }
 
-    // 获取（并在需要时创建）真正可并行工作的 OCR worker 池；
-    // 多处同时调用时复用同一个初始化 Promise，避免重复创建。
-    async function getOcrWorkerPool() {
-        if (ocrWorkerPool.length > 0) return ocrWorkerPool;
-        if (ocrPoolInitPromise) return ocrPoolInitPromise;
-        ocrPoolInitPromise = (async () => {
-            ocrStatusText.textContent = '正在准备文字识别引擎（首次使用需下载英文语言包，请稍候）…';
-            ocrWorkerPool = await Promise.all(
-                Array.from({ length: OCR_POOL_SIZE }, () => createOneOcrWorker())
-            );
-            return ocrWorkerPool;
-        })();
-        try {
-            return await ocrPoolInitPromise;
-        } finally {
-            ocrPoolInitPromise = null;
-        }
-    }
-
-    // ===== 整图预处理 =====
-    // 识别范围由"仅裁剪底部约20%区域"改为整张图片：不再裁剪，而是对整张
-    // 图做灰度化 + 自适应对比度拉伸，突出文字与背景/插画的反差，
-    // 帮助 Tesseract 在包含大量图案的整页画面中更准确地定位文字。
-    async function preprocessWholeImageForOcr(dataUrl) {
+    // ===== 优化的图像裁剪 - 多区域尝试 =====
+    async function cropRegionOptimized(dataUrl, bottomFrac = 0.22, topOffset = 0.03) {
         const img = await loadImageEl(dataUrl);
-        // 整页图片信息量比裁剪的一小条区域大得多，缩放上限比原来的裁剪区域更保守，
-        // 避免识别整张图片时的耗时过度增加；同时允许对偏小的图片适度放大以保清晰度。
-        const scale = Math.min(1.6, 1600 / img.naturalWidth);
+        const cropTop = Math.max(0, Math.floor(img.naturalHeight * (1 - bottomFrac - topOffset)));
+        const cropHeight = Math.max(1, Math.floor(img.naturalHeight * (bottomFrac + topOffset)));
+        
+        const scale = Math.min(2.5, 1600 / img.naturalWidth);
         const canvas = document.createElement('canvas');
         canvas.width = Math.max(200, Math.floor(img.naturalWidth * scale));
-        canvas.height = Math.max(200, Math.floor(img.naturalHeight * scale));
-
+        canvas.height = Math.max(50, Math.floor(cropHeight * scale));
+        
         const ctx = canvas.getContext('2d');
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, 0, 0, canvas.width, canvas.height);
-
+        ctx.drawImage(img, 0, cropTop, img.naturalWidth, cropHeight, 0, 0, canvas.width, canvas.height);
+        
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const data = imageData.data;
-        const len = data.length;
-        const pixelCount = len / 4;
-        const gray = new Uint8ClampedArray(pixelCount);
-        let minV = 255, maxV = 0;
-
-        for (let i = 0, j = 0; i < len; i += 4, j++) {
-            const g = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114) | 0;
-            gray[j] = g;
-            if (g < minV) minV = g;
-            if (g > maxV) maxV = g;
+        for (let i = 0; i < data.length; i += 4) {
+            const avg = (data[i] + data[i+1] + data[i+2]) / 3;
+            const enhanced = avg < 128 ? Math.max(0, avg - 20) : Math.min(255, avg + 20);
+            data[i] = enhanced;
+            data[i+1] = enhanced;
+            data[i+2] = enhanced;
         }
-
-        const range = maxV - minV;
-        if (range >= 10) {
-            const scaleC = 255 / range;
-            for (let i = 0, j = 0; i < len; i += 4, j++) {
-                let v = (gray[j] - minV) * scaleC;
-                if (v < 0) v = 0; else if (v > 255) v = 255;
-                data[i] = data[i + 1] = data[i + 2] = v;
-            }
-            ctx.putImageData(imageData, 0, 0);
-        }
-
+        ctx.putImageData(imageData, 0, 0);
+        
         return canvas.toDataURL('image/jpeg', 0.9);
     }
 
-    // ===== 整图识别 =====
-    // 原来对同一张图裁剪 3 个不同的底部区域各识别一次、取分数最高的结果，
-    // 相当于每张图要跑 3 遍 OCR。现在识别范围扩大为整张图片，一次识别即可
-    // 覆盖图片中所有位置的文字，因此只需 1 次 recognize 调用——既满足了
-    // "整图识别"的要求，也把单张图片的识别次数从 3 次降到 1 次，是本次
-    // 提速的主要来源之一（配合下方真正并行的 worker 池，效果叠加）。
+    // ===== 优化的单图识别 =====
     async function recognizeSingleImage(dataUrl, worker) {
-        try {
-            const procUrl = await preprocessWholeImageForOcr(dataUrl);
-            const { data } = await worker.recognize(procUrl);
-            const rawText = data && data.text ? data.text : '';
-            return cleanOcrTextEnhanced(rawText);
-        } catch (e) {
-            return '';
+        const regions = [
+            { bottom: 0.25, top: 0.02 },
+            { bottom: 0.20, top: 0.05 },
+            { bottom: 0.30, top: 0.02 }
+        ];
+        
+        let bestText = '';
+        let bestScore = -999;
+        
+        for (const region of regions) {
+            try {
+                const cropUrl = await cropRegionOptimized(dataUrl, region.bottom, region.top);
+                const { data } = await worker.recognize(cropUrl);
+                const rawText = data && data.text ? data.text : '';
+                const cleaned = cleanOcrTextEnhanced(rawText);
+                if (cleaned) {
+                    const score = scoreTextQuality(cleaned);
+                    if (score > bestScore) {
+                        bestScore = score;
+                        bestText = cleaned;
+                    }
+                }
+            } catch(e) {
+            }
         }
+        
+        return bestText;
     }
 
-    async function recognizeItemsOptimized(items, concurrency = OCR_POOL_SIZE) {
-        const pool = await getOcrWorkerPool();
+    async function recognizeItemsOptimized(items, concurrency = 4) {
+        const worker = await getOcrWorker();
         const results = new Array(items.length);
         let index = 0;
-
-        async function processLane(worker) {
+        
+        async function processNext() {
             while (index < items.length) {
                 const i = index++;
                 try {
@@ -3506,13 +3475,13 @@
                 }
             }
         }
-
-        const laneCount = Math.min(concurrency, pool.length, items.length) || 1;
-        const lanes = [];
-        for (let i = 0; i < laneCount; i++) {
-            lanes.push(processLane(pool[i]));
+        
+        const concurrencyCount = Math.min(concurrency, items.length);
+        const workers = [];
+        for (let i = 0; i < concurrencyCount; i++) {
+            workers.push(processNext());
         }
-        await Promise.all(lanes);
+        await Promise.all(workers);
         return results;
     }
 
@@ -3523,21 +3492,26 @@
 
         const itemsToProcess = [];
 
-        // 文件读取 + 解码 + 灰度检测并发执行（结果按原始顺序写回），
-        // 比原来的逐个 await 串行读取更快，且最终生成的 pendingItems 顺序不变。
-        const analyzed = await mapWithConcurrency(files, FILE_READ_CONCURRENCY, (file) => readAndAnalyzeFile(file));
+        for (const file of files) {
+            const dataUrl = await new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = (e) => resolve(e.target.result);
+                reader.readAsDataURL(file);
+            });
 
-        for (let i = 0; i < files.length; i++) {
-            const a = analyzed[i];
+            const img = await loadImageEl(dataUrl);
+            const imageData = await getImageData(img);
+            const isGray = isGrayscaleImage(imageData);
+
             const item = {
                 id: 'p' + (pendingIdSeq++),
-                name: a.file.name,
-                dataUrl: a.dataUrl,
+                name: file.name,
+                dataUrl: dataUrl,
                 text: '',
-                status: a.isGray ? 'done' : 'recognizing'
+                status: isGray ? 'done' : 'recognizing'
             };
             pendingItems.push(item);
-            if (!a.isGray) {
+            if (!isGray) {
                 itemsToProcess.push(item);
             }
         }
@@ -3547,11 +3521,10 @@
         if (itemsToProcess.length > 0) {
             ocrStatusText.textContent = `正在识别 ${itemsToProcess.length} 张图片...`;
             try {
-                const results = await recognizeItemsOptimized(itemsToProcess, OCR_POOL_SIZE);
+                const results = await recognizeItemsOptimized(itemsToProcess, 4);
                 itemsToProcess.forEach((item, idx) => {
-                    // recognizeItemsOptimized 内部已经调用过 cleanOcrTextEnhanced 做过滤，
-                    // 这里不再重复清洗（避免二次处理拖慢速度，也避免重复过滤产生偏差）。
-                    const finalText = results[idx] || '';
+                    const text = results[idx] || '';
+                    const finalText = cleanOcrTextEnhanced(text);
                     item.text = finalText;
                     item.status = finalText ? 'done' : 'error';
                 });
@@ -3825,10 +3798,31 @@
         };
     }
 
-    // 批量识别：直接复用真正并行的 recognizeItemsOptimized（内部使用 worker 池），
-    // 避免重复实现一份相同逻辑，同时自动获得真并行识别带来的速度提升。
-    async function batchRecognizeOptimized(pageItems, concurrency = OCR_POOL_SIZE) {
-        return recognizeItemsOptimized(pageItems, concurrency);
+    // 批量识别使用优化的单图识别
+    async function batchRecognizeOptimized(pageItems, concurrency = 6) {
+        const worker = await getOcrWorker();
+        const results = new Array(pageItems.length);
+        let index = 0;
+        
+        async function processNext() {
+            while (index < pageItems.length) {
+                const i = index++;
+                try {
+                    const text = await recognizeSingleImage(pageItems[i].dataUrl, worker);
+                    results[i] = text || '';
+                } catch (e) {
+                    results[i] = '';
+                }
+            }
+        }
+        
+        const concurrencyCount = Math.min(concurrency, pageItems.length);
+        const workers = [];
+        for (let i = 0; i < concurrencyCount; i++) {
+            workers.push(processNext());
+        }
+        await Promise.all(workers);
+        return results;
     }
 
     async function executeBatchImport(groups) {
@@ -3859,7 +3853,7 @@
         const statusElements = batchStoryList.querySelectorAll('.b-status');
 
         try {
-            await getOcrWorkerPool();
+            await getOcrWorker();
 
             let processed = 0;
             let successCount = 0;
@@ -3910,33 +3904,31 @@
                 };
 
                 const pageItems = [];
-                // 原实现用 for 循环逐张 await 读取文件（FileReader）+ 解码 + 灰度检测，
-                // 完全串行。这里改为有限并发读取，读取阶段可以多张图片同时进行，
-                // 结果仍按页面原始顺序处理，因此后续的失败日志、进度更新、
-                // 页面顺序等"导入逻辑"与原来完全一致，只是读取更快。
-                if (!batchCancelFlag) {
-                    const readResults = await mapWithConcurrency(group.pages, FILE_READ_CONCURRENCY, async (page, pIdx) => {
-                        try {
-                            const info = await readAndAnalyzeFile(page.file);
-                            return { ok: true, file: page.file, dataUrl: info.dataUrl, isGray: info.isGray, pageIdx: pIdx };
-                        } catch (err) {
-                            return { ok: false, file: page.file, error: err, pageIdx: pIdx };
-                        }
-                    });
-
-                    for (let pIdx = 0; pIdx < readResults.length; pIdx++) {
-                        if (batchCancelFlag) break;
-                        const r = readResults[pIdx];
-                        if (r.ok) {
-                            pageItems.push({ file: r.file, dataUrl: r.dataUrl, isGray: r.isGray, pageIdx: r.pageIdx });
-                        } else {
-                            logProgress(`  ⚠️ 读取失败: ${r.file.name} - ${(r.error && r.error.message) || '未知错误'}`);
-                            newStory.pages.push({ file: r.file.name, text: '' });
-                            processed++;
-                            const pct = totalImages > 0 ? Math.round((processed / totalImages) * 100) : 0;
-                            progressFill.style.width = Math.min(pct, 100) + '%';
-                            processedCountEl.textContent = processed;
-                        }
+                for (let pIdx = 0; pIdx < group.pages.length; pIdx++) {
+                    if (batchCancelFlag) break;
+                    const { file } = group.pages[pIdx];
+                    try {
+                        const dataUrl = await new Promise((resolve) => {
+                            const reader = new FileReader();
+                            reader.onload = (e) => resolve(e.target.result);
+                            reader.readAsDataURL(file);
+                        });
+                        const img = await loadImageEl(dataUrl);
+                        const imageData = await getImageData(img);
+                        const isGray = isGrayscaleImage(imageData);
+                        pageItems.push({
+                            file: file,
+                            dataUrl: dataUrl,
+                            isGray: isGray,
+                            pageIdx: pIdx
+                        });
+                    } catch (err) {
+                        logProgress(`  ⚠️ 读取失败: ${file.name} - ${err.message}`);
+                        newStory.pages.push({ file: file.name, text: '' });
+                        processed++;
+                        const pct = totalImages > 0 ? Math.round((processed / totalImages) * 100) : 0;
+                        progressFill.style.width = Math.min(pct, 100) + '%';
+                        processedCountEl.textContent = processed;
                     }
                 }
 
@@ -3944,7 +3936,7 @@
                 let recognizedTexts = [];
                 if (toRecognize.length > 0 && !batchCancelFlag) {
                     try {
-                        recognizedTexts = await batchRecognizeOptimized(toRecognize, OCR_POOL_SIZE);
+                        recognizedTexts = await batchRecognizeOptimized(toRecognize, 6);
                     } catch (e) {
                         logProgress(`  ⚠️ 识别出错: ${e.message}`);
                         recognizedTexts = toRecognize.map(() => '');
@@ -3977,6 +3969,7 @@
 
                 if (newStory.pages.length > 0 && !batchCancelFlag) {
                     parentNodes.push(newStory);
+                    sortNodes(parentNodes);
                     successCount++;
                     importedStoryIds.push(nid);
 
@@ -3999,13 +3992,6 @@
                 const pct = totalImages > 0 ? Math.round((processed / totalImages) * 100) : 0;
                 progressFill.style.width = Math.min(pct, 100) + '%';
                 processedCountEl.textContent = processed;
-            }
-
-            // 排序放到整个批量导入循环结束后统一执行一次，而不是每成功导入一本就
-            // 排序一次：最终顺序完全相同（sortNodes 与执行时机无关），但排序次数
-            // 从 N 次降为 1 次，批量导入的绘本越多，这里省下的耗时越明显。
-            if (successCount > 0) {
-                sortNodes(parentNodes);
             }
 
             saveLibrary();
@@ -4306,7 +4292,7 @@
     });
 
     /* =====================================================================
-       导出 / 导入 备份 按钮事件
+       导出 / 导入 备份 按钮事件 - 使用增强版函数
        ===================================================================== */
     document.getElementById('exportBackupBtn').addEventListener('click', exportBackup);
 
