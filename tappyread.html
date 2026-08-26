@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
+    <!-- 标签栏图标 -->
+    <link rel="icon" href="logo.png" type="image/png">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
     <!-- 关键修复：不发送 Referer。
@@ -10,7 +12,7 @@
          返回 403，图片因此加载失败。这里让浏览器对所有子资源请求都不发送 Referer，
          效果等同于"直接在地址栏访问"，可以绕开这个限制。 -->
     <meta name="referrer" content="no-referrer">
-    <title>点读绘本 · 精读版</title>
+    <title>点读机 · 精读版</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&family=Nunito:wght@500;700;800&display=swap" rel="stylesheet">
     <style>
@@ -163,6 +165,8 @@
         .action-btn-purple{ background:#9B59B6; color:#fff; border-color:#7D3C98; }
         .action-btn-orange{ background:#FF9A3D; color:#fff; border-color:#E67E22; }
         .action-btn-pink{ background:#FF6B8A; color:#fff; border-color:#D94560; }
+        /* 新增 PDF转图片 按钮颜色：青绿色 (Teal) */
+        .action-btn-teal{ background:#1ABC9C; color:#fff; border-color:#16A085; }
 
         .add-page-btn{
             background:#FF6B6B;
@@ -170,6 +174,7 @@
             border-color:#D94545;
         }
 
+        /* ===== 语音控件统一样式 ===== */
         .voice-pill{
             background:rgba(255,255,255,0.55);
             backdrop-filter:blur(6px);
@@ -180,6 +185,10 @@
             gap:6px;
             display:inline-flex;
             align-items:center;
+            min-height:32px;
+            height:auto;
+            border-radius:var(--btn-radius);
+            font-size:var(--head-btn-font-size);
         }
         .voice-pill select.voice-select{
             font-family:'Nunito',sans-serif;
@@ -187,20 +196,22 @@
             font-size:11px;
             border-radius:999px;
             border:2px solid var(--tent-navy);
-            padding:3px 8px;
+            padding:2px 8px;
             background:#fff;
             color:var(--ink);
             max-width:120px;
-            min-height:28px;
+            min-height:26px;
+            height:auto;
         }
         .voice-pill input[type=range]{
             accent-color:var(--clay);
-            width:56px;
+            width:48px;
             height:4px;
             cursor:pointer;
+            margin:0 2px;
         }
         .voice-pill .voice-icon{
-            font-size:14px;
+            font-size:13px;
             line-height:1;
         }
         .voice-pill .range-label{
@@ -692,6 +703,8 @@
         .help-content .step .btn-demo.pink{ background:#FF6B8A; color:#fff; border-color:#D94560; }
         .help-content .step .btn-demo.red{ background:#FF6B6B; color:#fff; border-color:#D94545; }
         .help-content .step .btn-demo.purple{ background:#9B59B6; color:#fff; border-color:#7D3C98; }
+        /* 新增演示按钮：青绿色 */
+        .help-content .step .btn-demo.teal{ background:#1ABC9C; color:#fff; border-color:#16A085; }
         .help-content .table-wrap{
             background:rgba(38,41,107,0.04);
             border-radius:12px;
@@ -898,6 +911,8 @@
             </div>
             <div class="right-group">
                 <button class="action-btn action-btn-pink" id="helpBtn">❓ 使用说明</button>
+                <!-- 新增：PDF转图片 按钮 (青绿色) -->
+                <button class="action-btn action-btn-teal" id="pdfConvertBtn">📄 PDF转图片</button>
                 <button class="action-btn action-btn-primary" id="batchImportBtn">📦 批量导入绘本</button>
                 <button class="action-btn action-btn-blue" id="newStoryBtn">📖 新增绘本</button>
                 <button class="add-page-btn" id="openAddModalBtn">➕ 添加绘本页面</button>
@@ -1139,7 +1154,7 @@
                 <!-- ===== 概述 ===== -->
                 <h2>📖 概述</h2>
                 <div class="step" style="border-left-color:var(--leaf);">
-                    点读绘本是一款专为儿童英语阅读设计的交互式学习工具，支持本地图片管理、OCR文字识别、语音朗读和目录备份。您可以通过本工具轻松创建、管理和阅读自己的绘本库。
+                    tappyread点读机是一款专为英语阅读设计的交互式学习工具，用你的PDF和图片，一分钟制作点读书，我的绘本我做主。——tappyread点读机
                 </div>
 
                 <!-- ===== 快速入门 ===== -->
@@ -1158,6 +1173,20 @@
                 <div class="step">
                     <strong>第二步：导入绘本目录</strong><br>
                     点击绘本目录左上角的 <span class="btn-demo green">📥 导入</span> 按钮，选择随工具提供的 <code>绘本目录备份_xxxx-xx-xx.json</code> 备份文件，导入成功后即可开始阅读初始化的绘本内容了！
+                </div>
+
+                <!-- ===== PDF转图片工具（放在创建自己的绘本之前） ===== -->
+                <h2>📄 PDF转图片工具</h2>
+                <div class="step" style="border-left-color:#1ABC9C;">
+                    点击顶部工具栏的 <span class="btn-demo teal">📄 PDF转图片</span> 按钮，打开独立的PDF转图片工具页面。<br>
+                    <strong>功能说明</strong>：
+                    <ul style="margin:4px 0; padding-left:18px;">
+                        <li>支持拖拽或选择多个PDF文件</li>
+                        <li>将PDF每一页转换为高质量JPG图片</li>
+                        <li>自动打包成ZIP文件下载</li>
+                        <li>完全在浏览器本地运行，文件不上传服务器</li>
+                    </ul>
+                    <div class="tip">使用场景：如果您有PDF格式的绘本电子书，可以先用此工具将每一页转换为JPG图片，然后使用「批量导入绘本」功能快速创建绘本。</div>
                 </div>
 
                 <h2>✨ 创建自己的绘本</h2>
@@ -1192,7 +1221,7 @@
                 <div class="table-wrap">
                     <table>
                         <tr><th>功能</th><th>按钮位置</th><th>说明</th></tr>
-                        <tr><td><strong>新建文件夹</strong></td><td>目录区左上角「✨ 新建」</td><td>创建文件夹，支持3级嵌套</td></tr>
+                        <tr><td><strong>新建文件夹</strong></td><td>目录区左上角「✨ 新建」</td><td>创建文件夹，支持3级嵌套。点击「新建」后会弹出选择框，让您决定在根目录还是当前选中的文件夹下创建。</td></tr>
                         <tr><td><strong>导入备份</strong></td><td>目录区左上角「📥 导入」</td><td>恢复之前导出的完整目录备份</td></tr>
                         <tr><td><strong>导出备份</strong></td><td>目录区左上角「📤 导出」</td><td>备份全部目录、绘本、页面文本</td></tr>
                         <tr><td><strong>搜索</strong></td><td>目录区搜索框</td><td>按绘本/文件夹名称模糊搜索</td></tr>
@@ -1326,6 +1355,35 @@
             </div>
             <div class="modal-actions" style="margin-top:6px;">
                 <button class="btn primary" id="helpCloseBtn">我知道了 👍</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============ Modal: 新建位置选择 ============ -->
+<div class="modal-overlay" id="locationModalOverlay">
+    <div class="modal-box narrow">
+        <div class="modal-header" style="background:var(--tent-navy);">
+            <h3>📁 选择创建位置</h3>
+            <button class="modal-close" id="closeLocationModalBtn">✕</button>
+        </div>
+        <div class="modal-body">
+            <div class="field">
+                <label style="font-size:14px;">请选择新文件夹的创建位置：</label>
+                <div style="display:flex; flex-direction:column; gap:10px; margin-top:6px;">
+                    <button class="btn primary" id="createRootBtn" style="justify-content:center; padding:14px; font-size:16px;">
+                        📂 根目录（顶级）
+                        <span style="font-size:12px; font-weight:400; opacity:0.8; display:block;">在根目录下创建新的顶级文件夹</span>
+                    </button>
+                    <button class="btn" id="createCurrentBtn" style="justify-content:center; padding:14px; font-size:16px; background:#5AB4E0; color:#fff; border-color:#3A7BD5; box-shadow:0 4px 0 #2A5A7A;">
+                        📁 当前选中文件夹
+                        <span style="font-size:12px; font-weight:400; opacity:0.8; display:block;" id="currentFolderPath">（未选中任何文件夹）</span>
+                    </button>
+                </div>
+                <div class="hint-text" style="margin-top:8px;">💡 选择「根目录」可创建多个并列的顶级文件夹</div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn" id="cancelLocationBtn">取消</button>
             </div>
         </div>
     </div>
@@ -3087,9 +3145,12 @@
     confirmFolderBtn.addEventListener('click', ()=>{
         const name = folderNameInput.value.trim();
         if(!name){ folderNameInput.focus(); return; }
-        const parentId = newFolderParentId;
+        // parentId 由调用方（位置选择弹窗 / 子文件夹按钮）显式传入：
+        // null 表示用户明确选择「根目录」，此处不应再回退到当前选中的文件夹，
+        // 否则会导致「新建根目录」被错误地创建成当前选中文件夹的子目录（这正是之前的 Bug）。
+        let parentId = newFolderParentId;
         const parentNodes = parentId ? findNodeById(library, parentId)?.children : library;
-        if(!parentNodes){ alert('父文件夹不存在'); closeFolderModal(); return; }
+        if(!parentNodes){ alert('目标文件夹不存在'); closeFolderModal(); return; }
         if(hasDuplicateName(parentNodes, name)){ alert('名称已存在'); folderNameInput.focus(); return; }
 
         const depth = parentId ? getNodeDepth(library, parentId) + 1 : 0;
@@ -4330,11 +4391,103 @@
     });
     clearSearchBtn.addEventListener('click', clearSearch);
 
+    /* =====================================================================
+       ===== 新建文件夹 - 智能位置选择 =====
+       ===================================================================== */
+    const locationModalOverlay = document.getElementById('locationModalOverlay');
+    const closeLocationModalBtn = document.getElementById('closeLocationModalBtn');
+    const cancelLocationBtn = document.getElementById('cancelLocationBtn');
+    const createRootBtn = document.getElementById('createRootBtn');
+    const createCurrentBtn = document.getElementById('createCurrentBtn');
+    const currentFolderPath = document.getElementById('currentFolderPath');
+
+    function openLocationModal() {
+        // 更新当前文件夹路径显示
+        let currentPath = '（未选中任何文件夹）';
+        if (selectedFolderId) {
+            const folder = findNodeById(library, selectedFolderId);
+            if (folder && folder.type === 'folder') {
+                currentPath = `📁 ${folder.name}`;
+                createCurrentBtn.style.display = 'flex';
+            } else {
+                currentPath = '（未选中任何文件夹）';
+                createCurrentBtn.style.display = 'flex';
+            }
+        } else {
+            currentPath = '（未选中任何文件夹）';
+            createCurrentBtn.style.display = 'flex';
+        }
+        currentFolderPath.textContent = currentPath;
+
+        // 如果当前没有选中文件夹，禁用"当前选中文件夹"按钮并给出提示
+        if (!selectedFolderId) {
+            createCurrentBtn.style.opacity = '0.5';
+            createCurrentBtn.style.cursor = 'not-allowed';
+            createCurrentBtn.style.background = '#b0a090';
+            createCurrentBtn.style.borderColor = '#8a7a6a';
+            createCurrentBtn.style.boxShadow = '0 4px 0 #6a5a4a';
+        } else {
+            const folder = findNodeById(library, selectedFolderId);
+            if (folder && folder.type === 'folder') {
+                createCurrentBtn.style.opacity = '1';
+                createCurrentBtn.style.cursor = 'pointer';
+                createCurrentBtn.style.background = '#5AB4E0';
+                createCurrentBtn.style.borderColor = '#3A7BD5';
+                createCurrentBtn.style.boxShadow = '0 4px 0 #2A5A7A';
+            } else {
+                createCurrentBtn.style.opacity = '0.5';
+                createCurrentBtn.style.cursor = 'not-allowed';
+                createCurrentBtn.style.background = '#b0a090';
+                createCurrentBtn.style.borderColor = '#8a7a6a';
+                createCurrentBtn.style.boxShadow = '0 4px 0 #6a5a4a';
+            }
+        }
+
+        locationModalOverlay.classList.add('open');
+    }
+
+    function closeLocationModal() {
+        locationModalOverlay.classList.remove('open');
+    }
+
+    // 点击"根目录"按钮
+    createRootBtn.addEventListener('click', () => {
+        closeLocationModal();
+        // 在根目录创建（parentId = null）
+        openNewFolderModal(null);
+    });
+
+    // 点击"当前选中文件夹"按钮
+    createCurrentBtn.addEventListener('click', () => {
+        if (!selectedFolderId) {
+            alert('当前未选中任何文件夹，请先选择一个文件夹或使用「根目录」选项。');
+            return;
+        }
+        const folder = findNodeById(library, selectedFolderId);
+        if (!folder || folder.type !== 'folder') {
+            alert('当前选中的不是有效文件夹，请重新选择。');
+            return;
+        }
+        const depth = getNodeDepth(library, selectedFolderId) + 1;
+        if (depth > 3) {
+            alert('最多支持3级文件夹，当前选中文件夹已达最大深度。');
+            return;
+        }
+        closeLocationModal();
+        openNewFolderModal(selectedFolderId);
+    });
+
+    // 关闭弹窗
+    closeLocationModalBtn.addEventListener('click', closeLocationModal);
+    cancelLocationBtn.addEventListener('click', closeLocationModal);
+    locationModalOverlay.addEventListener('click', (e) => {
+        if (e.target === locationModalOverlay) closeLocationModal();
+    });
+
+    // 修改"新建"按钮事件
     document.getElementById('newFolderBtn').addEventListener('click', () => {
-        const parentId = selectedFolderId;
-        const depth = parentId ? getNodeDepth(library, parentId) + 1 : 0;
-        if (depth > 3) { alert('最多支持3级文件夹'); return; }
-        openNewFolderModal(parentId);
+        // 弹出位置选择弹窗
+        openLocationModal();
     });
 
     /* =====================================================================
@@ -4378,6 +4531,15 @@
     helpCloseBtn.addEventListener('click', closeHelpModal);
     helpModalOverlay.addEventListener('click', (e) => {
         if (e.target === helpModalOverlay) closeHelpModal();
+    });
+
+    /* =====================================================================
+       ===== PDF转图片按钮 - 打开独立工具页面 =====
+       ===================================================================== */
+    const pdfConvertBtn = document.getElementById('pdfConvertBtn');
+    pdfConvertBtn.addEventListener('click', () => {
+        // 在新窗口/标签页中打开 PDF 转图片工具
+        window.open('pdfconvert.html', '_blank');
     });
 
     /* =====================================================================

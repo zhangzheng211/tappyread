@@ -1,11 +1,16 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
+    <!-- 标签栏图标 -->
+    <link rel="icon" href="logo.png" type="image/png">
+    <!-- 设置浏览器标签图标 -->
+    <link rel="icon" href="book-icon.ico" type="image/x-icon">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.5, user-scalable=yes">
-    <title>📖 点读绘本 · 登录</title>
+    <title>点读机 · 登录</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+
     <style>
         * {
             margin: 0;
@@ -26,7 +31,7 @@
                 repeating-linear-gradient(45deg, transparent, transparent 40px, rgba(255,220,160,0.05) 40px, rgba(255,220,160,0.05) 80px);
         }
 
-        /* ===== 登录卡片（卡通风格，与点读绘本同款） ===== */
+        /* ===== 登录卡片（卡通风格，与点读机同款） ===== */
         .login-card {
             width: 100%;
             max-width: 440px;
@@ -59,11 +64,21 @@
             text-align: center;
             margin-bottom: 24px;
         }
+
+        /* ===== Logo 图片样式 - 右移居中，位于标题正上方 ===== */
         .login-card .logo-area .icon-big {
-            font-size: 56px;
-            display: block;
-            line-height: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-bottom: 4px;
         }
+        .login-card .logo-area .icon-big img {
+            width: 60px;
+            height: 60px;
+            object-fit: contain;
+            display: block;
+        }
+
         .login-card .logo-area h1 {
             font-family: 'Baloo 2', cursive;
             font-size: 32px;
@@ -195,8 +210,9 @@
             .login-card .logo-area h1 {
                 font-size: 26px;
             }
-            .login-card .logo-area .icon-big {
-                font-size: 44px;
+            .login-card .logo-area .icon-big img {
+                width: 48px;
+                height: 48px;
             }
             .login-card .field input {
                 padding: 10px 14px;
@@ -216,7 +232,10 @@
         <!-- 圆点装饰由伪元素生成 -->
 
         <div class="logo-area">
-            <span class="icon-big">📖</span>
+            <!-- Logo 图片 - 在标题正上方居中显示 -->
+            <span class="icon-big">
+                <img src="logo.png" alt="tappyread logo">
+            </span>
             <h1>tappyread</h1>
             <h1>点读机</h1>
             <div class="sub">✨ 精读版 · 登录 ✨</div>
