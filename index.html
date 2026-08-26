@@ -3,6 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
+    <!-- 关键修复：不发送 Referer。
+         腾讯云 COS 存储桶默认开启了"防盗链"（Referer 白名单）保护：直接在地址栏输入图片地址
+         访问时浏览器不带 Referer，所以能看到图片；但被本页面以 <img> 方式加载时，浏览器会带上
+         当前页面的地址作为 Referer，如果这个来源没有在 COS 控制台的防盗链白名单里，COS 就会
+         返回 403，图片因此加载失败。这里让浏览器对所有子资源请求都不发送 Referer，
+         效果等同于"直接在地址栏访问"，可以绕开这个限制。 -->
+    <meta name="referrer" content="no-referrer">
     <title>点读绘本 · 精读版</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&family=Nunito:wght@500;700;800&display=swap" rel="stylesheet">
@@ -1335,7 +1342,21 @@
     const LS_WHITELIST_KEY = 'wib:whitelist';
     const LS_COLLAPSED_KEY = 'wib:collapsed_v2';
 
-    let imgDir = localStorage.getItem(LS_DIR_KEY) || '/Users/zhangzheng/Documents/01个人生活/05教育辅导/英语辅导/9.牛津阅读树/牛津阅读树stage 1的各个系列/jpeg/';
+    // 默认图片目录：优先使用腾讯云COS，同时保留本地目录作为回退
+    const DEFAULT_COS_DIR = 'https://tappyreadjpeg-1325106148.cos.ap-guangzhou.myqcloud.com/jpeg/';
+    const DEFAULT_LOCAL_DIR = '/Users/zhangzheng/Documents/01个人生活/05教育辅导/英语辅导/9.牛津阅读树/牛津阅读树stage 1的各个系列/jpeg/';
+
+    // 从 localStorage 读取，如果没有则使用COS作为默认值（线上环境优先）
+    let imgDir = localStorage.getItem(LS_DIR_KEY);
+    if (!imgDir) {
+        // 检查是否在本地环境（通过协议判断）
+        if (window.location.protocol === 'file:') {
+            imgDir = DEFAULT_LOCAL_DIR;
+        } else {
+            imgDir = DEFAULT_COS_DIR;
+        }
+        localStorage.setItem(LS_DIR_KEY, imgDir);
+    }
     if(!imgDir.endsWith('/')) imgDir += '/';
 
     /* =====================================================================
@@ -1530,7 +1551,7 @@
        ===================================================================== */
     const sessionSrcCache = {};
 
-    // 修改 pageSrc 函数，优先从 Base64 缓存加载图片，解决线上环境 file:// 协议被浏览器阻止的问题
+    // 核心图片加载函数：兼容本地目录和腾讯云COS
     function pageSrc(page){
         if(!page) return '';
         // 1. 优先从 session 缓存 (Base64) 加载
@@ -1541,9 +1562,19 @@
         if(page.src) {
             return page.src;
         }
-        // 3. 最后才尝试本地文件路径（仅在本地环境有效）
+        // 3. 从配置的 imgDir 加载（支持本地路径和COS地址）
         if(page.file) {
-            return encodeURI('file://' + imgDir + page.file);
+            const fileName = page.file;
+            // 判断 imgDir 是否为网络地址
+            if (imgDir.startsWith('http://') || imgDir.startsWith('https://')) {
+                // 网络地址：使用 encodeURIComponent 确保特殊字符被编码
+                // 但保留文件扩展名中的点号，避免被编码
+                const encodedFileName = encodeURIComponent(fileName).replace(/%2E/g, '.');
+                return imgDir + encodedFileName;
+            } else {
+                // 本地文件路径：使用 file:// 协议
+                return encodeURI('file://' + imgDir + fileName);
+            }
         }
         return '';
     }
@@ -2745,6 +2776,8 @@
         const imgBox = document.createElement('div');
         imgBox.className = 'page-img-box';
         const img = document.createElement('img');
+        // 不带 Referer 请求图片：避免触发 COS/CDN 的防盗链（Referer 白名单）拦截
+        img.referrerPolicy = 'no-referrer';
         // 使用优化后的 pageSrc 函数加载图片
         const imgSrc = pageSrc(page);
         if (imgSrc) {
@@ -2759,11 +2792,24 @@
             imgBox.appendChild(miss);
         }
         img.alt = page.text || ('第 ' + (globalIndex+1) + ' 页');
+        let imgRetried = false;
         img.addEventListener('error', ()=>{
+            // 网络地址先自动重试一次（可能是瞬时抖动），本地 file:// 地址重试没有意义，直接跳过
+            const isRemote = imgDir.startsWith('http://') || imgDir.startsWith('https://');
+            if (isRemote && !imgRetried && imgSrc) {
+                imgRetried = true;
+                setTimeout(()=>{ img.src = imgSrc + (imgSrc.includes('?') ? '&' : '?') + '_retry=' + Date.now(); }, 500);
+                return;
+            }
             if(imgBox.querySelector('.missing-img')) return;
             const miss = document.createElement('div');
             miss.className = 'missing-img';
-            miss.textContent = '⚠️ 图片加载失败：' + imgDir + (page.file || '');
+            if (isRemote) {
+                miss.innerHTML = '⚠️ 图片加载失败：' + imgDir + (page.file || '') +
+                    '<br><br>地址在浏览器地址栏能直接打开，但在本页面里加载不出来，通常是腾讯云 COS 存储桶开启了"防盗链"（Referer 白名单），拒绝了来自本页面的请求。请到 COS 控制台 → 存储桶 → 安全管理 → 防盗链设置，关闭防盗链，或把"允许空 Referer"打开 / 把本页面所在的域名加入白名单；同时确认存储桶的读写权限是"公有读"。';
+            } else {
+                miss.textContent = '⚠️ 图片加载失败：' + imgDir + (page.file || '') + '（本地路径需要在受支持的浏览器中通过 file:// 直接打开本页面，且路径、文件名需与实际一致）';
+            }
             imgBox.appendChild(miss);
         });
         imgBox.appendChild(img);
