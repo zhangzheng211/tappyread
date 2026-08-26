@@ -1,0 +1,4409 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
+    <!-- 关键修复：不发送 Referer。
+         腾讯云 COS 存储桶默认开启了"防盗链"（Referer 白名单）保护：直接在地址栏输入图片地址
+         访问时浏览器不带 Referer，所以能看到图片；但被本页面以 <img> 方式加载时，浏览器会带上
+         当前页面的地址作为 Referer，如果这个来源没有在 COS 控制台的防盗链白名单里，COS 就会
+         返回 403，图片因此加载失败。这里让浏览器对所有子资源请求都不发送 Referer，
+         效果等同于"直接在地址栏访问"，可以绕开这个限制。 -->
+    <meta name="referrer" content="no-referrer">
+    <title>点读绘本 · 精读版</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&family=Nunito:wght@500;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root{
+            --sunset-1:#FFC93C;
+            --sunset-2:#FF9A3D;
+            --tent-navy:#26296B;
+            --tent-blue:#5AB4E0;
+            --cream:#FFF6E4;
+            --clay:#E8623C;
+            --leaf:#3E8E5A;
+            --ink:#2B2440;
+            --danger:#C0392B;
+            --btn-radius:999px;
+            --btn-shadow:0 3px 0 rgba(38,41,107,0.18);
+            --head-btn-font-size:12px;
+            --head-btn-padding:6px 14px;
+        }
+        *{box-sizing:border-box;}
+        html,body{margin:0;padding:0;height:100%;}
+        body{
+            font-family:'Nunito', sans-serif;
+            color:var(--ink);
+            height:100vh;
+            overflow:hidden;
+            background:
+                radial-gradient(circle at 12% -10%, #fff2c4 0%, rgba(255,242,196,0) 45%),
+                linear-gradient(180deg, var(--sunset-1) 0%, var(--sunset-2) 38%, #FF7A59 62%, var(--tent-navy) 100%);
+            position:relative;
+        }
+        .silhouette{ position:fixed; opacity:0.13; pointer-events:none; z-index:0; }
+        .sil-dog{ top:4%; left:4%; width:130px; animation: drift1 22s ease-in-out infinite; }
+        .sil-bird{ top:6%; right:6%; width:80px; animation: drift1 26s ease-in-out infinite reverse; }
+        @keyframes drift1{ 0%,100%{transform:translate(0,0) rotate(0deg);} 50%{transform:translate(12px,-14px) rotate(3deg);} }
+        .app{
+            position:relative; z-index:2;
+            display:flex;
+            height:100vh;
+            padding:14px;
+            gap:14px;
+        }
+        .sidebar{
+            width:340px; flex:none;
+            background:rgba(255,246,228,0.92);
+            border:3px solid var(--tent-navy);
+            border-radius:22px;
+            box-shadow: 0 10px 0 rgba(38,41,107,0.18);
+            display:flex; flex-direction:column;
+            min-height:0;
+            overflow:hidden;
+        }
+        .sidebar-head{
+            display:flex; align-items:center; justify-content:space-between;
+            padding:12px 14px 10px;
+            border-bottom:3px dotted rgba(38,41,107,0.25);
+            flex-wrap:wrap;
+            gap:6px;
+        }
+        .sidebar-head .title{
+            font-family:'Baloo 2',sans-serif; font-weight:700; font-size:15px;
+            color:var(--tent-navy); display:flex; align-items:center; gap:6px;
+        }
+        .sidebar-head .head-actions{
+            display:flex; gap:4px; flex-wrap:wrap;
+            justify-content:flex-end;
+            align-items:center;
+        }
+        .head-btn{
+            font-family:'Baloo 2',sans-serif; font-weight:700;
+            font-size:var(--head-btn-font-size);
+            border-radius:var(--btn-radius);
+            padding:var(--head-btn-padding);
+            cursor:pointer;
+            border:2.5px solid var(--tent-navy);
+            box-shadow:var(--btn-shadow);
+            transition:0.08s linear;
+            white-space:nowrap;
+            display:inline-flex;
+            align-items:center;
+            gap:4px;
+            background:#fff;
+            color:var(--tent-navy);
+            line-height:1.2;
+            height:auto;
+            min-height:32px;
+        }
+        .head-btn:active{ transform:translateY(3px); box-shadow:none; }
+        .head-btn-new{ background:#FFD93D; color:var(--tent-navy); border-color:#E8C43A; }
+        .head-btn-import{ background:#6BCB77; color:#fff; border-color:#4CAF50; }
+        .head-btn-export{ background:#4D96FF; color:#fff; border-color:#3A7BD5; }
+
+        .topbar{
+            flex:none;
+            display:flex;
+            align-items:center;
+            justify-content:flex-end;
+            gap:8px;
+            padding:2px 4px 10px;
+            flex-wrap:wrap;
+            width:100%;
+        }
+        .topbar .left-group{
+            display:flex;
+            gap:8px;
+            align-items:center;
+            flex:0 0 auto;
+        }
+        .topbar .right-group{
+            display:flex;
+            align-items:center;
+            gap:8px;
+            flex-wrap:wrap;
+            justify-content:flex-end;
+            flex:1 1 auto;
+        }
+        .mobile-menu-btn{
+            display:none;
+        }
+        .action-btn-group{
+            display:flex;
+            gap:6px;
+            align-items:center;
+            flex-wrap:wrap;
+        }
+        .action-btn, .add-page-btn, .voice-pill, .head-btn{
+            font-family:'Baloo 2',sans-serif;
+            font-weight:700;
+            font-size:var(--head-btn-font-size);
+            border-radius:var(--btn-radius);
+            padding:var(--head-btn-padding);
+            cursor:pointer;
+            border:2.5px solid var(--tent-navy);
+            box-shadow:var(--btn-shadow);
+            transition:0.08s linear;
+            white-space:nowrap;
+            display:inline-flex;
+            align-items:center;
+            gap:4px;
+            background:#fff;
+            color:var(--tent-navy);
+            line-height:1.2;
+            min-height:32px;
+            height:auto;
+        }
+        .action-btn:active, .add-page-btn:active, .voice-pill:active{ transform:translateY(3px); box-shadow:none; }
+
+        .action-btn-primary{ background:#FFD93D; color:var(--tent-navy); border-color:#E8C43A; }
+        .action-btn-blue{ background:#4D96FF; color:#fff; border-color:#3A7BD5; }
+        .action-btn-green{ background:#6BCB77; color:#fff; border-color:#4CAF50; }
+        .action-btn-purple{ background:#9B59B6; color:#fff; border-color:#7D3C98; }
+        .action-btn-orange{ background:#FF9A3D; color:#fff; border-color:#E67E22; }
+        .action-btn-pink{ background:#FF6B8A; color:#fff; border-color:#D94560; }
+
+        .add-page-btn{
+            background:#FF6B6B;
+            color:#fff;
+            border-color:#D94545;
+        }
+
+        .voice-pill{
+            background:rgba(255,255,255,0.55);
+            backdrop-filter:blur(6px);
+            border:2.5px solid rgba(38,41,107,0.35);
+            box-shadow:var(--btn-shadow);
+            padding:var(--head-btn-padding);
+            cursor:default;
+            gap:6px;
+            display:inline-flex;
+            align-items:center;
+        }
+        .voice-pill select.voice-select{
+            font-family:'Nunito',sans-serif;
+            font-weight:700;
+            font-size:11px;
+            border-radius:999px;
+            border:2px solid var(--tent-navy);
+            padding:3px 8px;
+            background:#fff;
+            color:var(--ink);
+            max-width:120px;
+            min-height:28px;
+        }
+        .voice-pill input[type=range]{
+            accent-color:var(--clay);
+            width:56px;
+            height:4px;
+            cursor:pointer;
+        }
+        .voice-pill .voice-icon{
+            font-size:14px;
+            line-height:1;
+        }
+        .voice-pill .range-label{
+            font-size:11px;
+            color:var(--tent-navy);
+            line-height:1;
+        }
+
+        .search-row{
+            display:flex; align-items:center; gap:6px;
+            padding:8px 12px 4px 12px;
+            position:relative;
+        }
+        .search-row .input-wrap{
+            flex:1; min-width:0;
+            position:relative;
+            display:flex;
+            align-items:center;
+            background:rgba(255,255,255,0.6);
+            border:2px solid rgba(38,41,107,0.3);
+            border-radius:999px;
+            transition: border-color .2s, background .2s;
+        }
+        .search-row .input-wrap:focus-within{
+            border-color:var(--tent-blue);
+            background:#fff;
+        }
+        .search-row .input-wrap input{
+            flex:1; min-width:0;
+            font-family:'Nunito',sans-serif; font-size:13px; font-weight:600;
+            padding:6px 12px;
+            background:transparent;
+            border:none;
+            outline:none;
+            color:var(--ink);
+        }
+        .search-row .input-wrap .clear-btn{
+            flex:none;
+            width:20px; height:20px;
+            border-radius:50%;
+            background:rgba(38,41,107,0.15);
+            border:none;
+            font-size:14px;
+            line-height:1;
+            color:var(--tent-navy);
+            cursor:pointer;
+            display:none;
+            align-items:center;
+            justify-content:center;
+            margin-right:6px;
+            padding:0;
+            transition: background .15s;
+        }
+        .search-row .input-wrap .clear-btn:hover{
+            background:rgba(192,57,43,0.6);
+            color:#fff;
+        }
+        .search-row .input-wrap .clear-btn.visible{ display:flex; }
+        .search-btn{
+            flex:none;
+            font-family:'Baloo 2',sans-serif; font-weight:700;
+            font-size:var(--head-btn-font-size);
+            background:var(--tent-blue);
+            color:#fff;
+            border:2px solid var(--tent-navy);
+            border-radius:var(--btn-radius);
+            padding:var(--head-btn-padding);
+            cursor:pointer;
+            box-shadow:var(--btn-shadow);
+            transition:0.08s linear;
+            line-height:1.2;
+            min-height:32px;
+        }
+        .search-btn:active{ transform:translateY(3px); box-shadow:none; }
+
+        .tree{ flex:1; overflow-y:auto; padding:6px 8px 16px; }
+        .tree::-webkit-scrollbar{ width:8px; }
+        .tree::-webkit-scrollbar-thumb{ background:rgba(38,41,107,0.25); border-radius:8px; }
+
+        .tree-node{ margin-bottom:2px; }
+        .tree-node.folder-node > .node-row{ background:rgba(38,41,107,0.05); border-radius:10px; }
+        .tree-node.folder-node > .node-row:hover{ background:rgba(38,41,107,0.1); }
+        .tree-node .node-row{
+            display:flex; align-items:center; gap:4px;
+            padding:6px 6px 6px 4px;
+            border-radius:10px; cursor:pointer;
+            transition: background .15s ease;
+            position:relative;
+            user-select:none;
+        }
+        .tree-node .node-row:hover{ background:rgba(90,180,224,0.15); }
+        .tree-node .node-row.current{ background:var(--clay); }
+        .tree-node .node-row.current .node-title{ color:#fff; }
+        .tree-node .node-row.current .node-icon{ color:#fff; }
+        .tree-node .node-row.folder-selected{ background:var(--tent-blue); }
+        .tree-node .node-row.folder-selected .node-title{ color:#fff; }
+        .tree-node .node-row.folder-selected .node-icon{ color:#fff; }
+        .tree-node .node-row.dragging{ opacity:0.4; background:rgba(90,180,224,0.3); }
+        .tree-node .node-row.drag-over{ border:2px dashed var(--tent-blue); }
+
+        .node-icon{ flex:none; font-size:14px; width:20px; text-align:center; }
+        .node-caret{
+            flex:none; font-size:11px; width:16px; text-align:center;
+            color:var(--tent-navy); transition: transform .15s ease;
+            user-select:none;
+            cursor:pointer;
+        }
+        .node-caret.collapsed{ transform:rotate(-90deg); }
+        .node-caret.no-children{ visibility:hidden; }
+        .node-title{
+            flex:1; min-width:0;
+            font-family:'Baloo 2',sans-serif; font-weight:700; font-size:13px;
+            color:var(--tent-navy);
+            white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+        }
+        .node-actions{
+            display:flex; gap:2px; flex:none; opacity:0;
+            transition:opacity .15s ease;
+        }
+        .node-row:hover .node-actions{ opacity:1; }
+        .node-row.current .node-actions{ opacity:1; }
+        .node-row.folder-selected .node-actions{ opacity:1; }
+        .node-btn{
+            width:20px; height:20px; border-radius:6px; border:none;
+            background:rgba(255,255,255,0.7); cursor:pointer; font-size:10px;
+            display:flex; align-items:center; justify-content:center;
+            transition: background .15s;
+        }
+        .node-btn:hover{ background:rgba(38,41,107,0.2); }
+        .node-btn.danger:hover{ background:var(--danger); color:#fff; }
+        .node-btn.folder-add:hover{ background:var(--leaf); color:#fff; }
+        .node-btn.drag-handle{
+            cursor:grab; background:rgba(38,41,107,0.08);
+            font-size:12px;
+        }
+        .node-btn.drag-handle:hover{ background:rgba(38,41,107,0.2); }
+        .node-btn.drag-handle:active{ cursor:grabbing; }
+
+        .tree-children{ padding-left:20px; }
+        .node-badge{
+            font-size:10px; background:rgba(38,41,107,0.12); border-radius:999px;
+            padding:0 8px; color:var(--tent-navy); flex:none;
+            font-weight:700;
+        }
+        .node-sort-order{
+            font-size:9px; color:#8a7a5c; flex:none; font-weight:600;
+            min-width:18px; text-align:right;
+        }
+        .empty-hint{ padding:6px 10px; font-size:12px; color:#8a7a5c; font-style:italic; }
+
+        .page-list{
+            padding-left:32px;
+            margin:2px 0 4px 0;
+        }
+        .page-list-item{
+            display:flex; align-items:center; gap:6px;
+            padding:3px 8px; border-radius:6px; cursor:pointer;
+            font-size:12px; color:#4a3f63; font-weight:600;
+            transition:background .15s;
+        }
+        .page-list-item:hover{ background:rgba(90,180,224,0.12); }
+        .page-list-item.current{ background:var(--tent-blue); color:#fff; }
+        .page-list-item .pl-dot{
+            width:5px; height:5px; border-radius:50%; flex:none;
+            background:currentColor; opacity:0.5;
+        }
+        .page-list-item .pl-text{
+            flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+        }
+        .page-list-item .pl-del{
+            flex:none; width:18px; height:18px; border-radius:50%; border:none;
+            background:rgba(192,57,43,0.7); color:#fff; font-size:9px;
+            cursor:pointer; display:flex; align-items:center; justify-content:center;
+            opacity:0; transition:opacity .15s;
+        }
+        .page-list-item:hover .pl-del{ opacity:1; }
+        .page-list-item .pl-del:hover{ background:var(--danger); transform:scale(1.1); }
+
+        .main{
+            flex:1; min-width:0;
+            display:flex; flex-direction:column;
+            min-height:0;
+        }
+
+        .stage-wrap{
+            flex:1; min-height:0;
+            display:flex; flex-direction:column; align-items:center;
+            gap:8px;
+        }
+        .spread-tag{
+            font-family:'Baloo 2',sans-serif; font-weight:700; font-size:13px;
+            background:var(--tent-navy); color:#fff; padding:5px 14px; border-radius:999px;
+            flex:none; box-shadow:0 3px 0 rgba(0,0,0,0.2);
+        }
+        .story-caption{
+            flex:none; font-family:'Baloo 2',sans-serif; font-weight:700; font-size:15px;
+            color:#fff; text-shadow:1px 1px 0 rgba(0,0,0,0.2); opacity:0.9;
+        }
+        .spread-row{
+            flex:1; min-height:0; width:100%; max-width:1180px;
+            display:flex; align-items:stretch; gap:10px;
+        }
+        .nav-btn{
+            flex:none; align-self:center;
+            width:50px;height:50px;border-radius:50%;
+            background:var(--cream);
+            border:3px solid var(--tent-navy);
+            box-shadow: 0 6px 0 rgba(38,41,107,0.22);
+            display:flex;align-items:center;justify-content:center;
+            cursor:pointer; font-size:19px; color:var(--tent-navy); font-weight:900;
+        }
+        .nav-btn:active{ transform: translateY(4px); box-shadow:none; }
+        .nav-btn:disabled{ opacity:.35; cursor:not-allowed; }
+        .spread{
+            flex:1; min-width:0; min-height:0;
+            display:flex; gap:12px;
+        }
+        .page-panel{
+            flex:1; min-width:0; min-height:0;
+            display:flex; flex-direction:column;
+            background:var(--cream);
+            border:4px solid var(--tent-navy);
+            border-radius:20px;
+            box-shadow: 0 10px 0 rgba(38,41,107,0.2);
+            overflow:hidden;
+        }
+        .page-panel.empty{
+            align-items:center; justify-content:center;
+            background:repeating-linear-gradient(135deg, rgba(38,41,107,0.05) 0 10px, transparent 10px 20px);
+        }
+        .page-panel.empty .empty-msg{
+            font-family:'Baloo 2',sans-serif; font-weight:700; color:var(--tent-navy); opacity:0.5;
+            font-size:15px; text-align:center; padding:20px;
+        }
+        .page-img-box{
+            flex:1; min-height:0; position:relative;
+            display:flex; align-items:center; justify-content:center;
+            cursor:pointer; padding:8px;
+        }
+        .page-img-box img{
+            max-width:100%; max-height:100%; object-fit:contain;
+            border-radius:10px;
+        }
+        .ripple{
+            position:absolute; border-radius:50%;
+            background: radial-gradient(circle, rgba(255,201,60,0.85) 0%, rgba(255,201,60,0) 70%);
+            transform:translate(-50%,-50%) scale(0);
+            animation: ripple .6s ease-out forwards;
+            pointer-events:none;
+        }
+        .missing-img{
+            position:absolute; inset:8px; z-index:3;
+            display:flex; align-items:center; justify-content:center; text-align:center;
+            font-size:13px; font-weight:700; color:var(--danger);
+            background:rgba(255,246,228,0.95); border:2px dashed var(--danger);
+            border-radius:12px; padding:14px; word-break:break-all;
+        }
+        @keyframes ripple{ to{ transform:translate(-50%,-50%) scale(1); opacity:0; } }
+        .page-caption-bar{
+            flex:none;
+            display:flex; align-items:center; gap:8px;
+            padding:8px 10px;
+            border-top:3px dotted rgba(38,41,107,0.25);
+            max-height:34%;
+            overflow-y:auto;
+        }
+        .mini-speaker{
+            flex:none; width:34px;height:34px;border-radius:50%;
+            background:var(--clay); border:2px solid var(--tent-navy);
+            color:#fff; font-size:14px; cursor:pointer;
+            display:flex; align-items:center; justify-content:center;
+            box-shadow:0 3px 0 #a83f24;
+        }
+        .mini-speaker:active{ transform:translateY(2px); box-shadow:none; }
+        .mini-speaker.speaking{ animation: speakbounce .5s ease-in-out infinite; }
+        @keyframes speakbounce{ 0%,100%{transform:scale(1);} 50%{transform:scale(1.12);} }
+        .caption-text{
+            flex:1; min-width:0;
+            font-family:'Baloo 2', sans-serif;
+            font-size: clamp(15px, 2.1vw, 22px);
+            font-weight:700; line-height:1.3;
+            max-height: 1.6em;
+            overflow: hidden;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+            cursor: default;
+        }
+        .caption-text.truncated::after {
+            content: "......";
+            font-weight: 700;
+            color: var(--clay);
+            padding-left: 4px;
+        }
+        .word{ cursor:pointer; border-radius:6px; padding:0 2px; transition:background .15s ease,color .15s ease; }
+        .word:hover{ background: rgba(90,180,224,0.25); }
+        .word.active{ background: var(--clay); color:#fff; }
+        .mini-edit-btn{
+            flex:none; width:34px;height:34px;border-radius:50%;
+            background:var(--tent-blue); border:2px solid var(--tent-navy);
+            color:#fff; font-size:14px; cursor:pointer;
+            display:flex; align-items:center; justify-content:center;
+            box-shadow:0 3px 0 rgba(38,41,107,0.4);
+        }
+        .mini-edit-btn:active{ transform:translateY(2px); box-shadow:none; }
+        .page-edit-area{
+            flex:1; min-width:0; display:flex; gap:6px; align-items:flex-start;
+        }
+        .page-edit-area textarea{
+            flex:1; min-width:0; resize:vertical; min-height:44px;
+            font-family:'Nunito',sans-serif; font-size:14px; font-weight:700;
+            border:2px solid var(--tent-navy); border-radius:10px; padding:6px 8px;
+            color:var(--ink);
+        }
+        .pe-btn{
+            flex:none; font-family:'Baloo 2',sans-serif; font-weight:700; font-size:12px;
+            border-radius:999px; border:2px solid var(--tent-navy); cursor:pointer;
+            padding:6px 11px; color:#fff;
+        }
+        .pe-btn.save{ background:var(--leaf); }
+        .pe-btn.cancel{ background:#9a90a8; }
+
+        .modal-overlay{
+            position:fixed; inset:0; background:rgba(20,18,40,0.55);
+            display:none; align-items:center; justify-content:center;
+            z-index:200; padding:18px;
+        }
+        .modal-overlay.open{ display:flex; }
+        .modal-box{
+            background:#fff; border-radius:22px; border:4px solid var(--tent-navy);
+            width:100%; max-width:620px; max-height:88vh; overflow-y:auto;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.35);
+        }
+        .modal-box.narrow{ max-width:420px; }
+        .modal-header{
+            display:flex; align-items:center; justify-content:space-between;
+            padding:14px 18px; background:var(--tent-blue); color:#fff;
+            position:sticky; top:0; z-index:2;
+        }
+        .modal-header h3{ margin:0; font-family:'Baloo 2',sans-serif; font-size:17px; }
+        .modal-close{ background:none; border:none; color:#fff; font-size:20px; cursor:pointer; line-height:1; }
+        .modal-body{ padding:18px; display:grid; gap:14px; }
+        .field{ display:grid; gap:6px; }
+        .field label{ font-weight:800; font-size:13px; color:var(--tent-navy); }
+        .field input[type=text]{
+            font-family:'Nunito',sans-serif; font-size:15px; padding:10px 12px;
+            border-radius:12px; border:2px solid rgba(38,41,107,0.35);
+        }
+        .dropzone{
+            border:3px dashed rgba(38,41,107,0.4);
+            border-radius:16px; padding:20px; text-align:center;
+            cursor:pointer; background: var(--cream);
+            transition: background .15s ease, border-color .15s ease;
+        }
+        .dropzone.drag{ background:#fff1c9; border-color: var(--clay); }
+        .dropzone .icon{ font-size:28px; }
+        .dropzone small{ display:block; margin-top:4px; color:#6b5a3f; font-weight:700; }
+        .pending-list{
+            display:grid; gap:10px; max-height:280px; overflow-y:auto; padding-right:4px;
+        }
+        .pending-item{
+            display:flex; gap:12px; align-items:flex-start;
+            background:#fff; border:2px solid rgba(38,41,107,0.2);
+            border-radius:14px; padding:10px;
+            cursor:pointer;
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+        }
+        .pending-item:hover{
+            transform: scale(1.01);
+            box-shadow: 0 4px 12px rgba(38,41,107,0.15);
+        }
+        .pending-item img{
+            width:54px; height:64px; object-fit:cover; border-radius:8px;
+            border:2px solid var(--tent-navy); flex:none;
+            cursor:pointer;
+            transition: transform 0.2s ease;
+        }
+        .pending-item img:hover{
+            transform: scale(1.05);
+        }
+        .pi-body{ flex:1; display:grid; gap:6px; min-width:0; }
+        .pi-body textarea{
+            width:100%; font-family:'Nunito',sans-serif; font-size:14px;
+            padding:8px 10px; border-radius:10px; border:2px solid rgba(38,41,107,0.3);
+            resize:vertical;
+            max-height: 6em;
+            overflow-y: auto;
+        }
+        .pi-status{ font-size:11px; font-weight:800; display:flex; align-items:center; gap:5px; }
+        .pi-status.recognizing{ color:#a86a1c; }
+        .pi-status.recognizing .spin{ animation: spin 1s linear infinite; display:inline-block; }
+        .pi-status.done{ color:#2f7d46; }
+        .pi-status.error{ color:#b8402a; }
+        @keyframes spin{ to{ transform: rotate(360deg); } }
+        .pi-remove{ flex:none; background:none; border:none; font-size:16px; cursor:pointer; color:#b8402a; padding:4px; }
+        .modal-actions{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:center; }
+        .modal-actions.left{ justify-content:flex-start; }
+        .btn{
+            font-family:'Baloo 2',sans-serif; font-weight:700; font-size:14px;
+            padding:10px 18px; border-radius:999px; border:3px solid var(--tent-navy);
+            cursor:pointer; background:#fff; color:var(--tent-navy);
+            box-shadow: 0 4px 0 rgba(38,41,107,0.25);
+        }
+        .btn:active{ transform: translateY(3px); box-shadow:none; }
+        .btn.primary{ background: var(--leaf); color:#fff; border-color:#245c37; box-shadow:0 4px 0 #1c4a2c; }
+        .btn:disabled{ opacity:.4; cursor:not-allowed; }
+        .btn.danger{ background:var(--danger); color:#fff; border-color:#a93226; }
+        .btn.success{ background:var(--leaf); color:#fff; border-color:#245c37; box-shadow:0 4px 0 #1c4a2c; }
+        .hint-text{ font-size:12px; color:#6b5a3f; font-weight:700; }
+        .dir-selector-row{
+            display:flex; gap:8px; align-items:center; flex-wrap:wrap;
+        }
+        .dir-selector-row input[type=text]{
+            flex:1; min-width:120px;
+            font-family:'Nunito',sans-serif; font-size:14px; padding:8px 10px;
+            border-radius:10px; border:2px solid rgba(38,41,107,0.35);
+        }
+        .dir-pick-btn{
+            font-family:'Baloo 2',sans-serif; font-weight:700; font-size:12px;
+            background:var(--tent-blue); color:#fff; border:2px solid var(--tent-navy);
+            border-radius:999px; padding:6px 14px; cursor:pointer;
+            white-space:nowrap;
+        }
+        .dir-pick-btn:active{ transform:scale(0.96); }
+        .dir-volume-hint{
+            font-size:11px; color:#6b5a3f; margin-top:4px;
+        }
+        .preview-overlay{
+            position:fixed; inset:0; background:rgba(0,0,0,0.85);
+            display:none; align-items:center; justify-content:center;
+            z-index:999; padding:20px;
+            cursor:pointer;
+        }
+        .preview-overlay.open{ display:flex; }
+        .preview-overlay img{
+            max-width:95vw; max-height:90vh; object-fit:contain;
+            border-radius:12px; box-shadow:0 10px 60px rgba(0,0,0,0.6);
+            border:3px solid rgba(255,255,255,0.2);
+        }
+        .preview-overlay .close-hint{
+            position:fixed; bottom:30px; left:50%; transform:translateX(-50%);
+            color:rgba(255,255,255,0.5); font-size:14px; font-family:'Nunito',sans-serif;
+            background:rgba(0,0,0,0.4); padding:8px 20px; border-radius:999px;
+            pointer-events:none;
+        }
+
+        /* ===== 使用说明弹窗 - 增强内容 ===== */
+        .help-modal .modal-box{ max-width:760px; max-height:92vh; }
+        .help-modal .modal-header{ background:var(--tent-blue); position:sticky; top:0; z-index:5; }
+        .help-content{
+            font-family:'Nunito',sans-serif;
+            font-size:14px;
+            line-height:1.7;
+            color:var(--ink);
+        }
+        .help-content h2{
+            font-family:'Baloo 2',sans-serif;
+            font-size:20px;
+            color:var(--tent-navy);
+            margin:14px 0 6px 0;
+            display:flex;
+            align-items:center;
+            gap:8px;
+        }
+        .help-content h2:first-child{ margin-top:0; }
+        .help-content .step{
+            background:rgba(90,180,224,0.08);
+            border-radius:12px;
+            padding:10px 14px;
+            margin:6px 0;
+            border-left:4px solid var(--tent-blue);
+        }
+        .help-content .step strong{ color:var(--tent-navy); }
+        .help-content .step .btn-demo{
+            display:inline-block;
+            font-family:'Baloo 2',sans-serif;
+            font-weight:700;
+            font-size:12px;
+            padding:2px 12px;
+            border-radius:999px;
+            background:rgba(38,41,107,0.12);
+            color:var(--tent-navy);
+            border:2px solid rgba(38,41,107,0.2);
+            margin:0 2px;
+        }
+        .help-content .step .btn-demo.blue{ background:#4D96FF; color:#fff; border-color:#3A7BD5; }
+        .help-content .step .btn-demo.green{ background:#6BCB77; color:#fff; border-color:#4CAF50; }
+        .help-content .step .btn-demo.yellow{ background:#FFD93D; color:var(--tent-navy); border-color:#E8C43A; }
+        .help-content .step .btn-demo.orange{ background:#FF9A3D; color:#fff; border-color:#E67E22; }
+        .help-content .step .btn-demo.pink{ background:#FF6B8A; color:#fff; border-color:#D94560; }
+        .help-content .step .btn-demo.red{ background:#FF6B6B; color:#fff; border-color:#D94545; }
+        .help-content .step .btn-demo.purple{ background:#9B59B6; color:#fff; border-color:#7D3C98; }
+        .help-content .table-wrap{
+            background:rgba(38,41,107,0.04);
+            border-radius:12px;
+            padding:8px 12px;
+            margin:6px 0;
+            overflow-x:auto;
+        }
+        .help-content table{
+            width:100%;
+            border-collapse:collapse;
+            font-size:13px;
+        }
+        .help-content table th{
+            text-align:left;
+            font-weight:800;
+            color:var(--tent-navy);
+            padding:6px 8px;
+            border-bottom:2px solid rgba(38,41,107,0.15);
+        }
+        .help-content table td{
+            padding:6px 8px;
+            border-bottom:1px solid rgba(38,41,107,0.08);
+        }
+        .help-content .tip{
+            background:rgba(255,201,60,0.15);
+            border-radius:8px;
+            padding:8px 14px;
+            margin:6px 0;
+            border:1px solid rgba(255,201,60,0.3);
+        }
+        .help-content .tip::before{ content:"💡 "; }
+        .help-content .warning{
+            background:rgba(192,57,43,0.08);
+            border-radius:8px;
+            padding:8px 14px;
+            margin:6px 0;
+            border:1px solid rgba(192,57,43,0.2);
+        }
+        .help-content .warning::before{ content:"⚠️ "; font-weight:700; color:var(--danger); }
+        .help-content .faq-item{
+            background:rgba(255,255,255,0.5);
+            border-radius:8px;
+            padding:6px 12px;
+            margin:4px 0;
+        }
+        .help-content .faq-item strong{ color:var(--tent-navy); }
+        .help-content .shortcut-grid{
+            display:grid;
+            grid-template-columns:1fr 1fr;
+            gap:6px;
+        }
+        .help-content .shortcut-grid .sc-item{
+            display:flex;
+            justify-content:space-between;
+            background:rgba(255,255,255,0.4);
+            padding:4px 12px;
+            border-radius:6px;
+            font-size:13px;
+        }
+        .help-content .shortcut-grid .sc-item .key{
+            background:rgba(38,41,107,0.1);
+            padding:0 10px;
+            border-radius:4px;
+            font-weight:700;
+            font-size:12px;
+            color:var(--tent-navy);
+        }
+        .help-content .icon-row{
+            display:flex;
+            flex-wrap:wrap;
+            gap:4px;
+            align-items:center;
+        }
+
+        .batch-story-list{
+            display:grid; gap:8px; max-height:240px; overflow-y:auto; padding-right:4px;
+        }
+        .batch-story-item{
+            display:flex; align-items:center; gap:10px;
+            padding:8px 12px; border-radius:10px;
+            border:2px solid rgba(38,41,107,0.15);
+            background:rgba(255,255,255,0.6);
+            transition:all 0.15s ease;
+        }
+        .batch-story-item .b-name{ flex:1; font-weight:700; font-size:14px; color:var(--tent-navy); }
+        .batch-story-item .b-pages{ font-size:13px; color:#6b5a3f; flex:none; }
+        .batch-story-item .b-status{
+            font-size:12px; font-weight:700; padding:2px 12px; border-radius:999px;
+            flex:none;
+        }
+        .batch-story-item .b-status.pending{ background:rgba(38,41,107,0.12); color:var(--tent-navy); }
+        .batch-story-item .b-status.success{ background:rgba(62,142,90,0.2); color:var(--leaf); }
+        .batch-story-item .b-status.failed{ background:rgba(192,57,43,0.15); color:var(--danger); }
+        .batch-story-item .b-status.importing{ background:rgba(90,180,224,0.25); color:var(--tent-blue); animation: pulse-status 0.8s ease-in-out infinite; }
+        @keyframes pulse-status{ 0%,100%{opacity:1;} 50%{opacity:0.5;} }
+
+        .progress-modal .modal-box{ max-width:600px; }
+        .progress-bar-wrap{
+            background:rgba(38,41,107,0.12); border-radius:999px; height:24px; overflow:hidden;
+            border:2px solid var(--tent-navy);
+        }
+        .progress-bar-fill{
+            height:100%; width:0%; background:linear-gradient(90deg, var(--leaf), var(--tent-blue));
+            border-radius:999px; transition:width 0.3s ease;
+        }
+        .progress-bar-fill.complete{ background:linear-gradient(90deg, var(--leaf), #2ecc71); }
+        .progress-stats{
+            display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; text-align:center;
+            font-weight:700; font-size:14px; color:var(--tent-navy);
+        }
+        .progress-stats span{ display:block; font-size:20px; color:var(--clay); }
+        .progress-log{
+            max-height:120px; overflow-y:auto; font-size:12px; background:rgba(38,41,107,0.05);
+            border-radius:10px; padding:8px 12px; font-family:'Nunito',sans-serif;
+            border:1px solid rgba(38,41,107,0.12);
+        }
+        .progress-log div{ padding:2px 0; border-bottom:1px solid rgba(38,41,107,0.06); }
+
+        .import-complete .modal-header{ background:var(--leaf); }
+        .import-complete .modal-header h3{ color:#fff; }
+        .import-complete .modal-header h3::before{ content:"✅ "; }
+
+        .depth-indent-1{ padding-left:4px; }
+        .depth-indent-2{ padding-left:18px; }
+        .depth-indent-3{ padding-left:32px; }
+
+        .whitelist-tag{
+            display:inline-block; background:rgba(62,142,90,0.15); color:var(--leaf);
+            padding:2px 10px; border-radius:999px; font-size:12px; font-weight:700;
+            margin:2px; border:1px solid rgba(62,142,90,0.2);
+        }
+        .whitelist-tag .remove{
+            cursor:pointer; margin-left:4px; color:var(--danger); font-weight:700;
+        }
+        .whitelist-tag .remove:hover{ color:#a93226; }
+
+        @media (max-width: 860px){
+            .spread{ flex-direction:column; }
+            .page-caption-bar{ max-height:26%; }
+            .sidebar{ position:fixed; left:14px; top:14px; bottom:14px; z-index:150;
+                transform:translateX(-120%); transition:transform .25s ease; width:85vw; max-width:300px; }
+            .sidebar.open{ transform:translateX(0); }
+            .mobile-menu-btn{
+                display:inline-flex !important;
+                align-items:center;
+                justify-content:center;
+                width:36px;
+                height:36px;
+                border-radius:50%;
+                background:var(--cream);
+                border:3px solid var(--tent-navy);
+                font-size:18px;
+                cursor:pointer;
+            }
+            .topbar .left-group{
+                flex:0 0 auto;
+            }
+            .topbar .right-group{
+                flex:1 1 100%;
+                justify-content:flex-start;
+                margin-top:4px;
+            }
+            .voice-pill select.voice-select{ max-width:96px; }
+            .action-btn-group{ flex-wrap:wrap; }
+            .help-modal .modal-box{ max-width:95vw; max-height:95vh; }
+            .help-content .shortcut-grid{ grid-template-columns:1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<svg class="silhouette sil-dog" viewBox="0 0 200 140" xmlns="http://www.w3.org/2000/svg" fill="#26296B">
+    <path d="M20 120 Q10 100 25 90 Q15 70 35 60 Q30 40 55 35 Q60 15 85 20 Q100 5 115 20 Q135 15 140 35 Q160 40 155 60 Q175 65 165 85 Q180 95 165 110 Q170 125 150 125 Q140 135 120 125 Q100 132 80 122 Q60 132 40 122 Q25 130 20 120 Z"/>
+</svg>
+<svg class="silhouette sil-bird" viewBox="0 0 120 80" xmlns="http://www.w3.org/2000/svg" fill="#26296B">
+    <path d="M5 40 Q30 10 55 35 Q65 15 90 20 Q110 22 115 40 Q95 35 85 45 Q100 50 105 62 Q85 58 75 48 Q60 60 40 52 Q45 45 55 43 Q30 48 5 40 Z"/>
+</svg>
+
+<div class="app">
+
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-head">
+            <div class="title">📚 绘本目录</div>
+            <div class="head-actions">
+                <button class="head-btn head-btn-new" id="newFolderBtn">✨ 新建</button>
+                <button class="head-btn head-btn-import" id="importBackupBtn" title="导入目录备份">📥 导入</button>
+                <button class="head-btn head-btn-export" id="exportBackupBtn" title="导出目录备份">📤 导出</button>
+            </div>
+        </div>
+        <div class="search-row">
+            <div class="input-wrap">
+                <input type="text" id="searchInput" placeholder="搜索绘本/文件夹…">
+                <button class="clear-btn" id="clearSearchBtn" title="清除搜索">✕</button>
+            </div>
+            <button class="search-btn" id="searchBtn">🔍 搜索</button>
+        </div>
+        <div class="tree" id="tree"></div>
+    </aside>
+
+    <div class="main">
+        <div class="topbar">
+            <div class="left-group">
+                <button class="mobile-menu-btn" id="mobileMenuBtn">☰</button>
+            </div>
+            <div class="right-group">
+                <button class="action-btn action-btn-pink" id="helpBtn">❓ 使用说明</button>
+                <button class="action-btn action-btn-primary" id="batchImportBtn">📦 批量导入绘本</button>
+                <button class="action-btn action-btn-blue" id="newStoryBtn">📖 新增绘本</button>
+                <button class="add-page-btn" id="openAddModalBtn">➕ 添加绘本页面</button>
+                <button class="action-btn action-btn-purple" id="whitelistBtn" style="border-color:#7D3C98;">📝 单词白名单</button>
+                <button class="action-btn action-btn-orange" id="dirSettingBtn">📁 图片目录</button>
+                <div class="voice-pill" title="朗读设置">
+                    <span class="voice-icon">🎙️</span>
+                    <select class="voice-select" id="voiceSelect" title="选择朗读音色"></select>
+                    <span class="range-label">🐢</span>
+                    <input type="range" id="rateRange" min="0.6" max="1.1" step="0.05" value="0.8" title="朗读语速">
+                    <span class="range-label">🐇</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="stage-wrap">
+            <div class="story-caption" id="storyCaption"></div>
+            <div class="spread-tag" id="spreadTag">1–2 / 5</div>
+            <div class="spread-row">
+                <div class="nav-btn" id="prevBtn">◀</div>
+                <div class="spread" id="spread"></div>
+                <div class="nav-btn" id="nextBtn">▶</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============ 图片预览遮罩 ============ -->
+<div class="preview-overlay" id="previewOverlay">
+    <img id="previewImage" src="" alt="预览">
+    <div class="close-hint">点击任意位置关闭预览</div>
+</div>
+
+<!-- ============ Modal: Add pages ============ -->
+<div class="modal-overlay" id="addModalOverlay">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h3 id="addModalTitle">添加绘本页面</h3>
+            <button class="modal-close" id="closeAddModalBtn">✕</button>
+        </div>
+        <div class="modal-body">
+            <div class="field">
+                <label>1. 选择绘本图片（支持一次多选 / 拖拽多张）</label>
+                <div class="dropzone" id="dropzone">
+                    <div class="icon">🖼️</div>
+                    <div>点击选择图片，或把多张图片一起拖到这里</div>
+                    <small>精准识别底部黑体文字，智能过滤乱码</small>
+                    <input type="file" id="fileInput" accept="image/*" multiple style="display:none">
+                </div>
+                <div class="hint-text" id="dirHint"></div>
+            </div>
+
+            <div class="field" id="pendingWrap" style="display:none;">
+                <label>2. 识别结果（点击图片可预览，可直接编辑修正，再统一加入）</label>
+                <div class="pending-list" id="pendingList"></div>
+            </div>
+
+            <div class="modal-actions left">
+                <button class="btn primary" id="addAllBtn" disabled>全部加入绘本 📖</button>
+                <button class="btn" id="clearAllBtn">清空列表</button>
+            </div>
+            <div class="hint-text" id="ocrStatusText">提示：精准识别底部黑体文字，自动过滤乱码。灰度图自动跳过。</div>
+        </div>
+    </div>
+</div>
+
+<!-- ============ Modal: Batch Import (分析列表 + 确认) ============ -->
+<div class="modal-overlay" id="batchPreviewOverlay">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h3>📦 批量导入绘本 - 预览</h3>
+            <button class="modal-close" id="closeBatchPreviewBtn">✕</button>
+        </div>
+        <div class="modal-body">
+            <div class="field">
+                <label>识别到以下绘本（共 <span id="batchPreviewCount">0</span> 个）</label>
+                <div class="batch-story-list" id="batchStoryList"></div>
+                <div class="hint-text" id="batchPreviewHint">请确认以上绘本信息无误后，点击「确认导入」开始导入。</div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn primary" id="confirmBatchBtn">✅ 确认导入</button>
+                <button class="btn" id="cancelBatchPreviewBtn">取消</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============ Modal: Batch Import Progress ============ -->
+<div class="modal-overlay progress-modal" id="batchProgressOverlay">
+    <div class="modal-box" id="batchProgressBox">
+        <div class="modal-header" id="batchProgressHeader">
+            <h3 id="batchProgressTitle">📦 批量导入中...</h3>
+            <button class="modal-close" id="closeBatchProgressBtn">✕</button>
+        </div>
+        <div class="modal-body">
+            <div class="field">
+                <label>导入进度</label>
+                <div class="progress-bar-wrap">
+                    <div class="progress-bar-fill" id="progressFill" style="width:0%"></div>
+                </div>
+            </div>
+            <div class="progress-stats">
+                <div>总绘本 <span id="totalStories">0</span></div>
+                <div>总图片 <span id="totalImages">0</span></div>
+                <div>已处理 <span id="processedCount">0</span></div>
+            </div>
+            <div class="field">
+                <label>导入日志</label>
+                <div class="progress-log" id="progressLog"></div>
+            </div>
+            <div class="modal-actions" id="batchProgressActions">
+                <button class="btn danger" id="cancelBatchBtn">取消导入</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============ Modal: Story name ============ -->
+<div class="modal-overlay" id="storyModalOverlay">
+    <div class="modal-box narrow">
+        <div class="modal-header">
+            <h3 id="storyModalTitle">新增绘本</h3>
+            <button class="modal-close" id="closeStoryModalBtn">✕</button>
+        </div>
+        <div class="modal-body">
+            <div class="field">
+                <label>绘本名称</label>
+                <input type="text" id="storyNameInput" placeholder="例如：Kipper's Diary">
+            </div>
+            <div class="modal-actions">
+                <button class="btn primary" id="confirmStoryBtn">确定</button>
+                <button class="btn" id="cancelStoryBtn">取消</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============ Modal: New Folder ============ -->
+<div class="modal-overlay" id="folderModalOverlay">
+    <div class="modal-box narrow">
+        <div class="modal-header">
+            <h3 id="folderModalTitle">新建文件夹</h3>
+            <button class="modal-close" id="closeFolderModalBtn">✕</button>
+        </div>
+        <div class="modal-body">
+            <div class="field">
+                <label>文件夹名称</label>
+                <input type="text" id="folderNameInput" placeholder="例如：Stage 1">
+                <div class="hint-text" id="folderDepthHint">当前深度: 0 / 3</div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn primary" id="confirmFolderBtn">创建</button>
+                <button class="btn" id="cancelFolderBtn">取消</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============ Modal: Rename Folder ============ -->
+<div class="modal-overlay" id="renameFolderModalOverlay">
+    <div class="modal-box narrow">
+        <div class="modal-header">
+            <h3>重命名文件夹</h3>
+            <button class="modal-close" id="closeRenameFolderModalBtn">✕</button>
+        </div>
+        <div class="modal-body">
+            <div class="field">
+                <label>新名称</label>
+                <input type="text" id="renameFolderInput" placeholder="输入新名称">
+            </div>
+            <div class="modal-actions">
+                <button class="btn primary" id="confirmRenameFolderBtn">确定</button>
+                <button class="btn" id="cancelRenameFolderBtn">取消</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============ Modal: Image directory ============ -->
+<div class="modal-overlay" id="dirModalOverlay">
+    <div class="modal-box narrow">
+        <div class="modal-header">
+            <h3>本地图片目录设置</h3>
+            <button class="modal-close" id="closeDirModalBtn">✕</button>
+        </div>
+        <div class="modal-body">
+            <div class="field">
+                <label>绘本图片所在目录（本机绝对路径）</label>
+                <div class="dir-selector-row">
+                    <input type="text" id="dirInput" placeholder="/Volumes/U盘/jpeg/ 或 /Users/.../jpeg/">
+                    <button class="dir-pick-btn" id="dirPickBtn">📂 选择</button>
+                </div>
+                <div class="dir-volume-hint">💡 支持选择 U 盘、移动硬盘、本地磁盘等任意目录。点击「选择」后，在弹出的系统对话框中选择目标文件夹，路径将自动填入并保存。</div>
+                <div class="hint-text">绘本页面按「文件名」引用此目录下的图片。修改目录后，所有绘本会立即从新目录加载。</div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn primary" id="confirmDirBtn">保存</button>
+                <button class="btn" id="cancelDirBtn">取消</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============ Modal: 单词白名单管理 ============ -->
+<div class="modal-overlay" id="whitelistModalOverlay">
+    <div class="modal-box narrow">
+        <div class="modal-header">
+            <h3>📝 单词白名单管理</h3>
+            <button class="modal-close" id="closeWhitelistModalBtn">✕</button>
+        </div>
+        <div class="modal-body">
+            <div class="field">
+                <label>当前白名单单词（这些单词及其词形变化在识别时不会被过滤）</label>
+                <div id="whitelistTags" style="display:flex; flex-wrap:wrap; gap:4px; padding:6px 0; min-height:40px;"></div>
+                <div class="hint-text">💡 添加新单词：输入后按回车或点击添加按钮（支持复数/过去式等词形自动识别）</div>
+                <div style="display:flex; gap:8px;">
+                    <input type="text" id="whitelistInput" placeholder="输入单词，如 apple" style="flex:1; padding:8px 12px; border-radius:10px; border:2px solid rgba(38,41,107,0.3); font-family:'Nunito',sans-serif; font-size:14px;">
+                    <button class="btn primary" id="whitelistAddBtn" style="padding:8px 16px; font-size:13px;">添加</button>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn" id="whitelistResetBtn" style="border-color:var(--danger); color:var(--danger);">恢复默认</button>
+                <button class="btn primary" id="whitelistCloseBtn">关闭</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============ Modal: 使用说明（完整版） ============ -->
+<div class="modal-overlay help-modal" id="helpModalOverlay">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h3>📖 使用说明</h3>
+            <button class="modal-close" id="closeHelpModalBtn">✕</button>
+        </div>
+        <div class="modal-body" style="padding:16px 18px;">
+            <div class="help-content">
+
+                <!-- ===== 概述 ===== -->
+                <h2>📖 概述</h2>
+                <div class="step" style="border-left-color:var(--leaf);">
+                    点读绘本是一款专为儿童英语阅读设计的交互式学习工具，支持本地图片管理、OCR文字识别、语音朗读和目录备份。您可以通过本工具轻松创建、管理和阅读自己的绘本库。
+                </div>
+
+                <!-- ===== 快速入门 ===== -->
+                <h2>🚀 快速入门</h2>
+
+                <div class="step">
+                    <strong>使用内置绘本库（推荐新手）</strong><br>
+                    本工具已内置了一套牛津阅读树绘本库，您只需两步即可开始阅读：
+                </div>
+
+                <div class="step">
+                    <strong>第一步：设置图片目录</strong><br>
+                    点击顶部工具栏的 <span class="btn-demo orange">📁 图片目录</span> 按钮，选择您存放绘本图片的文件夹路径（支持U盘、移动硬盘等）。设置后，所有绘本将从此目录加载图片。
+                </div>
+
+                <div class="step">
+                    <strong>第二步：导入绘本目录</strong><br>
+                    点击绘本目录左上角的 <span class="btn-demo green">📥 导入</span> 按钮，选择随工具提供的 <code>绘本目录备份_xxxx-xx-xx.json</code> 备份文件，导入成功后即可开始阅读初始化的绘本内容了！
+                </div>
+
+                <h2>✨ 创建自己的绘本</h2>
+
+                <div class="step">
+                    <strong>第一步：创建绘本</strong><br>
+                    有两种方式创建绘本：
+                    <div class="table-wrap">
+                        <table>
+                            <tr><th>方式</th><th>操作</th><th>适用场景</th></tr>
+                            <tr><td><span class="btn-demo blue">📖 新增绘本</span></td><td>点击 <span class="btn-demo blue">📖 新增绘本</span>，输入名称即可创建</td><td>手动创建单个绘本</td></tr>
+                            <tr><td><span class="btn-demo yellow">📦 批量导入绘本</span></td><td>点击 <span class="btn-demo yellow">📦 批量导入绘本</span>，选择多张图片自动识别分组</td><td>从图片文件批量创建多个绘本</td></tr>
+                        </table>
+                    </div>
+                    <div class="tip">批量导入小技巧：将图片按 <code>01-绘本名-01.jpg</code>、<code>01-绘本名-02.jpg</code> 或 <code>绘本名 1.jpg</code> 等格式命名，系统会自动按绘本名称分组，一次导入多个绘本。</div>
+                </div>
+
+                <div class="step">
+                    <strong>第二步：添加页面</strong><br>
+                    选中一个绘本后，点击 <span class="btn-demo red">➕ 添加绘本页面</span>，上传图片（支持多选/拖拽），系统会自动识别图片底部的英文文字并填入。您也可以手动编辑修正识别结果。
+                </div>
+
+                <div class="step">
+                    <strong>第三步：开始点读</strong><br>
+                    点击绘本页面上的 <span class="btn-demo">🔊</span> 按钮或直接点击图片，即可播放对应的英文朗读。点击页面中的任意单词，可单独朗读该单词。
+                </div>
+
+                <!-- ===== 核心功能详解 ===== -->
+                <h2>🎯 核心功能详解</h2>
+
+                <h3 style="font-family:'Baloo 2',sans-serif; font-size:16px; color:var(--tent-navy); margin:8px 0 4px 0;">1. 绘本目录管理</h3>
+                <div class="table-wrap">
+                    <table>
+                        <tr><th>功能</th><th>按钮位置</th><th>说明</th></tr>
+                        <tr><td><strong>新建文件夹</strong></td><td>目录区左上角「✨ 新建」</td><td>创建文件夹，支持3级嵌套</td></tr>
+                        <tr><td><strong>导入备份</strong></td><td>目录区左上角「📥 导入」</td><td>恢复之前导出的完整目录备份</td></tr>
+                        <tr><td><strong>导出备份</strong></td><td>目录区左上角「📤 导出」</td><td>备份全部目录、绘本、页面文本</td></tr>
+                        <tr><td><strong>搜索</strong></td><td>目录区搜索框</td><td>按绘本/文件夹名称模糊搜索</td></tr>
+                        <tr><td><strong>删除/重命名</strong></td><td>鼠标悬停目录项</td><td>显示编辑和删除按钮</td></tr>
+                    </table>
+                </div>
+
+                <h3 style="font-family:'Baloo 2',sans-serif; font-size:16px; color:var(--tent-navy); margin:8px 0 4px 0;">2. 绘本页面操作</h3>
+                <div class="table-wrap">
+                    <table>
+                        <tr><th>功能</th><th>操作方式</th><th>说明</th></tr>
+                        <tr><td><strong>翻页</strong></td><td>点击 ◀ ▶ 按钮或键盘左右键</td><td>跨页浏览（双页展示）</td></tr>
+                        <tr><td><strong>点读</strong></td><td>点击图片或 🔊 按钮</td><td>朗读该页的英文文字</td></tr>
+                        <tr><td><strong>单词点读</strong></td><td>点击页面中的任意单词</td><td>单独朗读该单词</td></tr>
+                        <tr><td><strong>编辑文字</strong></td><td>点击 ✏️ 按钮</td><td>修改本页朗读文本</td></tr>
+                        <tr><td><strong>删除页面</strong></td><td>目录中悬停页面项，点击 ✕</td><td>删除该页（至少保留1页）</td></tr>
+                    </table>
+                </div>
+
+                <h3 style="font-family:'Baloo 2',sans-serif; font-size:16px; color:var(--tent-navy); margin:8px 0 4px 0;">3. 批量导入绘本</h3>
+                <div class="step">
+                    <strong>使用场景</strong>：您有一批按一定规则命名的图片文件，希望快速生成多个绘本。<br>
+                    <strong>文件名格式要求</strong>：
+                    <pre style="background:rgba(38,41,107,0.04); padding:6px 12px; border-radius:8px; font-size:12px; margin:4px 0;">
+01-Kipper's Diary-01.jpg     → 绘本"Kipper's Diary"的第1页
+01-Kipper's Diary-02.jpg     → 绘本"Kipper's Diary"的第2页
+02-Spaceman-01.jpg           → 绘本"Spaceman"的第1页</pre>
+                    <strong>支持的命名模式</strong>：
+                    <ul style="margin:4px 0; padding-left:18px;">
+                        <li><code>数字-绘本名-页码.jpg</code></li>
+                        <li><code>绘本名 页码.jpg</code></li>
+                        <li><code>数字 绘本名 页码.jpg</code></li>
+                    </ul>
+                    <strong>操作步骤</strong>：
+                    <ol style="margin:4px 0; padding-left:18px;">
+                        <li>点击 <span class="btn-demo yellow">📦 批量导入绘本</span></li>
+                        <li>选择所有图片文件（支持多选）</li>
+                        <li>系统自动分析并按绘本名称分组</li>
+                        <li>预览确认每个绘本的页面和名称</li>
+                        <li>点击「✅ 确认导入」，系统自动识别每页文字并导入</li>
+                    </ol>
+                </div>
+
+                <h3 style="font-family:'Baloo 2',sans-serif; font-size:16px; color:var(--tent-navy); margin:8px 0 4px 0;">4. OCR文字识别</h3>
+                <div class="step">
+                    <strong>工作原理</strong>：系统会裁剪图片底部约20-30%的区域（通常是白色文字条），使用Tesseract OCR引擎识别英文文字，并自动过滤乱码。<br>
+                    <strong>优化建议</strong>：
+                    <ul style="margin:4px 0; padding-left:18px;">
+                        <li>确保图片底部文字清晰、对比度高</li>
+                        <li>支持批量识别，多张图片并发处理</li>
+                        <li>识别完成后可手动编辑修正</li>
+                    </ul>
+                </div>
+
+                <h3 style="font-family:'Baloo 2',sans-serif; font-size:16px; color:var(--tent-navy); margin:8px 0 4px 0;">5. 单词白名单</h3>
+                <div class="step">
+                    点击 <span class="btn-demo purple">📝 单词白名单</span> 管理常用单词列表，系统在OCR识别后会自动保留白名单中的单词，提高识别准确率。<br>
+                    <strong>功能</strong>：
+                    <ul style="margin:4px 0; padding-left:18px;">
+                        <li>添加新单词（自动识别复数、过去式等变形）</li>
+                        <li>删除自定义单词</li>
+                        <li>恢复默认白名单</li>
+                    </ul>
+                </div>
+
+                <h3 style="font-family:'Baloo 2',sans-serif; font-size:16px; color:var(--tent-navy); margin:8px 0 4px 0;">6. 语音朗读设置</h3>
+                <div class="table-wrap">
+                    <table>
+                        <tr><th>设置项</th><th>说明</th></tr>
+                        <tr><td><strong>音色选择</strong></td><td>下拉菜单选择不同的语音引擎</td></tr>
+                        <tr><td><strong>语速调节</strong></td><td>滑动条调整朗读速度（慢→快）</td></tr>
+                    </table>
+                </div>
+
+                <!-- ===== 数据备份与恢复 ===== -->
+                <h2>💾 数据备份与恢复</h2>
+                <div class="step">
+                    <strong>导出备份</strong><br>
+                    点击 <span class="btn-demo green">📤 导出</span>，将当前所有数据导出为 <code>.json</code> 文件：
+                    <ul style="margin:4px 0; padding-left:18px;">
+                        <li>✅ 完整的文件夹目录结构</li>
+                        <li>✅ 所有绘本及页面文本</li>
+                        <li>✅ 图片目录路径</li>
+                        <li>✅ 白名单设置</li>
+                        <li>✅ 界面状态（选中的绘本、折叠状态等）</li>
+                    </ul>
+                </div>
+                <div class="step">
+                    <strong>导入备份</strong><br>
+                    点击 <span class="btn-demo green">📥 导入</span>，选择之前导出的 <code>.json</code> 文件即可恢复全部数据。
+                    <div class="warning">导入会覆盖当前所有数据，请确保已备份重要内容。</div>
+                </div>
+
+                <!-- ===== 快捷键 ===== -->
+                <h2>⌨️ 快捷键</h2>
+                <div class="shortcut-grid">
+                    <div class="sc-item"><span>◀ 左箭头</span><span class="key">←</span></div>
+                    <div class="sc-item"><span>▶ 右箭头</span><span class="key">→</span></div>
+                    <div class="sc-item"><span>确认操作</span><span class="key">Enter</span></div>
+                    <div class="sc-item"><span>关闭弹窗/取消编辑</span><span class="key">Esc</span></div>
+                </div>
+
+                <!-- ===== 常见问题 ===== -->
+                <h2>❓ 常见问题</h2>
+                <div class="faq-item"><strong>Q1: 图片显示"未找到图片"？</strong><br>检查 <span class="btn-demo orange">📁 图片目录</span> 路径是否正确，确保图片文件名与绘本页面中记录的文件名一致。</div>
+                <div class="faq-item"><strong>Q2: OCR识别不准确？</strong><br>
+                    <ul style="margin:2px 0; padding-left:18px;">
+                        <li>确保图片底部文字区域清晰</li>
+                        <li>使用 <span class="btn-demo purple">📝 单词白名单</span> 添加常用单词</li>
+                        <li>识别后可手动编辑修正</li>
+                    </ul>
+                </div>
+                <div class="faq-item"><strong>Q3: 备份文件导入后图片不显示？</strong><br>导入备份后，检查 <span class="btn-demo orange">📁 图片目录</span> 是否与备份时的路径一致。如有变化，重新设置图片目录即可。</div>
+                <div class="faq-item"><strong>Q4: 批量导入时识别到乱码？</strong><br>系统已内置智能乱码过滤，如果仍有乱码，请检查图片底部文字是否清晰，或手动编辑修正。</div>
+                <div class="faq-item"><strong>Q5: 支持哪些图片格式？</strong><br>支持常见格式：JPG、PNG、BMP、WebP等。</div>
+
+                <!-- ===== 移动端适配 ===== -->
+                <h2>📱 移动端适配</h2>
+                <div class="step">
+                    在手机或平板上使用时：
+                    <ul style="margin:4px 0; padding-left:18px;">
+                        <li>侧边目录会自动收起，点击左上角 <span class="btn-demo">☰</span> 展开</li>
+                        <li>绘本页面自动切换为纵向排列</li>
+                        <li>所有按钮和文字自动适配屏幕大小</li>
+                    </ul>
+                </div>
+
+                <div style="text-align:center; margin-top:12px; color:#8a7a5c; font-family:'Baloo 2',sans-serif; font-size:16px;">
+                    ✨ 祝您和孩子们阅读愉快！📚
+                </div>
+            </div>
+            <div class="modal-actions" style="margin-top:6px;">
+                <button class="btn primary" id="helpCloseBtn">我知道了 👍</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script>
+    /* =====================================================================
+       ===== 数据持久化核心 =====
+       ===================================================================== */
+    const LS_LIB_KEY  = 'wib:library:v26';
+    const LS_DIR_KEY  = 'wib:imgDir';
+    const LS_FOLDER_KEY = 'wib:selectedFolder';
+    const LS_WHITELIST_KEY = 'wib:whitelist';
+    const LS_COLLAPSED_KEY = 'wib:collapsed_v2';
+
+    // 默认图片目录：优先使用腾讯云COS，同时保留本地目录作为回退
+    const DEFAULT_COS_DIR = 'https://tappyreadjpeg-1325106148.cos.ap-guangzhou.myqcloud.com/jpeg/';
+    const DEFAULT_LOCAL_DIR = '/Users/zhangzheng/Documents/01个人生活/05教育辅导/英语辅导/9.牛津阅读树/牛津阅读树stage 1的各个系列/jpeg/';
+
+    // 从 localStorage 读取，如果没有则使用COS作为默认值（线上环境优先）
+    let imgDir = localStorage.getItem(LS_DIR_KEY);
+    if (!imgDir) {
+        // 检查是否在本地环境（通过协议判断）
+        if (window.location.protocol === 'file:') {
+            imgDir = DEFAULT_LOCAL_DIR;
+        } else {
+            imgDir = DEFAULT_COS_DIR;
+        }
+        localStorage.setItem(LS_DIR_KEY, imgDir);
+    }
+    if(!imgDir.endsWith('/')) imgDir += '/';
+
+    /* =====================================================================
+       ===== 单词白名单 =====
+       ===================================================================== */
+    const DEFAULT_WHITELIST = [
+	'blue', 'yellow', 'white', 'green', 'orange', 'black', 'red', 'purple', 'brown',
+'school', 'student', 'blackboard', 'book', 'teacher', 'school bus', 'chair', 'office', 'lights', 'class', 'gym', 'lesson', 'desk', 'classroom', 'card',
+'pen', 'envelope', 'notebook', 'eraser', 'stamp', 'paper', 'ruler', 'glue', 'pencil', 'marker', 'pencil case', 'scissors',
+'number', 'ten', 'thirty', 'zero', 'eleven', 'forty', 'one', 'twelve', 'fifty', 'two', 'thirteen', 'sixty', 'three', 'fourteen', 'seventy', 'four', 'fifteen', 'eighty', 'five', 'sixteen', 'ninety', 'six', 'seventeen', 'one hundred', 'seven', 'eighteen', 'nine hundred', 'eight', 'nineteen', 'one thousand', 'nine', 'twenty', 'Ten thousand', 'first', 'fifth', 'ninth', 'second', 'sixth', 'tenth', 'third', 'seventh', 'fourth', 'eighth',
+'family', 'uncle', 'daughter', 'father', 'cousin', 'son', 'dad', 'nephew', 'grandpa', 'mother', 'niece', 'grandma', 'mum', 'brother', 'aunt', 'sister',
+'body', 'arm', 'ear', 'eye', 'face', 'leg', 'finger', 'toe', 'foot', 'mouth', 'shoulder', 'ankle', 'hand', 'nose', 'stomach', 'wrist', 'head', 'elbow', 'knee',
+'home', 'window', 'wall', 'bathroom', 'bathtub', 'lamp', 'bed', 'ceiling', 'bedroom', 'dish', 'closet', 'kitchen', 'refrigerator', 'dresser', 'living room', 'sink', 'shower', 'room', 'stove', 'couch', 'house', 'toilet', 'towel', 'door',
+'blouse', 'skirt', 'jacket', 'clothes', 'T‑shirt', 'scarf', 'dress', 'socks', 'sweater', 'pants', 'pajamas', 'swimsuit', 'shirt', 'gloves', 'sandals', 'shorts', 'boots', 'mittens',
+'year', 'week', 'evening', 'tomorrow', 'time', 'morning', 'night', 'birthday', 'day', 'noon', 'today', 'holiday', 'Christmas',
+'Monday', 'Thursday', 'Sunday', 'Tuesday', 'Friday', 'Wednesday', 'Saturday',
+'January', 'May', 'September', 'February', 'June', 'October', 'March', 'July', 'November', 'April', 'August', 'December',
+'season', 'summer', 'winter', 'spring', 'fall',
+'people', 'waitress', 'child', 'boy', 'waiter', 'children', 'girl', 'actor', 'man', 'Chinese', 'actress', 'men', 'doctor', 'businessman', 'woman', 'friend', 'businesswoman', 'women', 'neighbor', 'judge', 'Santa', 'cashier', 'baby', 'singer', 'clerk',
+'shape', 'line', 'square', 'circle', 'rectangle', 'triangle',
+'breakfast', 'beef', 'snack', 'supper', 'lamb', 'flour', 'lunch', 'cookies', 'oil', 'meat', 'sugar', 'salt', 'pork', 'egg', 'chicken',
+'sky', 'mountain', 'farm', 'sun', 'cloud', 'rock', 'field', 'snow', 'beach', 'tree', 'mud', 'rain', 'boat', 'river', 'pond', 'wind', 'lake', 'grass', 'sand', 'ocean', 'flower', 'rose', 'leaves', 'star',
+'corner', 'country', 'hall', 'restaurant', 'park', 'city', 'hotel', 'market', 'shop', 'China', 'street', 'mall', 'world', 'Canada',
+'fun', 'address', 'letter', 'song', 'umbrella', 'gift', 'thing', 'surprise', 'movie', 'e‑mail', 'car', 'music', 'computer', 'snowball', 'ticket', 'toy', 'snowman', 'trip', 'camera', 'flag', 'film', 'violin', 'party', 'picture', 'story', 'postcard',
+'cold', 'favourite', 'right', 'last', 'happy', 'lovely', 'wrong', 'next', 'hot', 'new', 'bad', 'easy', 'hungry', 'nice', 'beautiful', 'fast', 'sad', 'poor', 'best', 'hard', 'thirsty', 'late', 'better', 'loud', 'old', 'short', 'quick', 'young', 'tall', 'western', 'quiet', 'delicious', 'famous', 'special', 'slow',
+'once', 'sometimes', 'quickly', 'finally', 'well', 'always', 'quietly', 'soon', 'together', 'loudly', 'slowly', 'then', 'never', 'early', 'very',
+'rainy', 'windy', 'warm', 'snowy', 'sunny', 'cloudy',
+'draw', 'find', 'see', 'carry', 'hear', 'go', 'send', 'fly', 'know', 'help', 'sit', 'forget', 'show', 'learn', 'stand', 'lie', 'walk', 'like', 'went', 'miss', 'listen', 'love', 'bring', 'skip', 'meet', 'play', 'cook', 'swim', 'minus', 'sleep', 'dry', 'remember', 'need', 'read', 'fall', 'ring', 'plus', 'buy', 'give', 'tell', 'put', 'arrive', 'invite', 'wake', 'smell', 'come', 'open', 'will', 'take', 'hurt', 'skate', 'clean', 'write', 'jump', 'ski', 'teach', 'wear', 'leave', 'think', 'visit', 'eat', 'look', 'wash', 'watch', 'run', 'point', 'begin', 'call',
+'beside', 'above', 'below', 'at', 'top', 'around', 'from', 'bottom', 'in the middle of', 'under', 'left', 'in front of', 'with', 'right', 'next to', 'near', 'east', 'from…to', 'inside', 'south', 'towards', 'outside', 'west', 'behind', 'north',
+'I', 'my', 'this', 'me', 'your', 'those', 'you', 'them', 'some', 'he', 'mine', 'any', 'she', 'yours', 'all', 'they', 'that', 'something', 'their', 'these', 'every',
+'sheep', 'feather', 'monkey', 'rooster', 'bird', 'fur', 'wolf', 'cow', 'rabbit', 'paws', 'camel', 'duck', 'donkey', 'tail', 'ostrich', 'pig', 'mouse', 'lion', 'giraffe', 'cat', 'horse', 'tiger', 'panda', 'dog', 'snake', 'elephant', 'goat', 'wing', 'kangaroo', 'zebra', 'dragon',
+'bike', 'bell', 'cab', 'wheel', 'taxi', 'ship', 'tire', 'truck', 'airplane', 'chain', 'bus', 'train',
+'turn right', 'take off', 'hung up the phone', 'turn left', 'put on', 'look like', 'turn off', 'stay at home', 'make a call', 'turn on', 'go to school', 'swimming pool', 'turn around', 'answer the phone', 'talk on the phone', 'walk forward', 'call on the phone', 'talk to', 'walk backward', 'go up the stairs', 'go straight', 'go down the stairs',
+'movie theatre', 'bicycle shop', 'traffic lights', 'office building', 'grocery store', 'apartment building', 'department store', 'radio show', 'book department', 'TV show', 'toy department', 'ice cream', 'clothes shop', 'bus stop',
+
+        'blue', 'yellow', 'white', 'green',
+
+        'red', 'black', 'pink', 'orange', 'purple', 'brown', 'grey', 'gray',
+
+        'apple', 'book', 'cat', 'dog', 'fish', 'bird', 'tree', 'flower', 'sun', 'moon',
+
+        'star', 'cloud', 'rain', 'snow', 'wind', 'happy', 'sad', 'big', 'small', 'tall',
+
+        'short', 'fast', 'slow', 'hot', 'cold', 'warm', 'cool', 'soft', 'hard', 'sweet',
+
+        'sour', 'salty', 'bitter', 'delicious', 'beautiful', 'handsome', 'cute', 'lovely',
+
+        'kind', 'brave', 'clever', 'smart', 'funny', 'friendly', 'shy', 'proud', 'gentle','meet','Japanese','Korean','Chinese','too','make','Swedish','English','American','Italian','Volvo','Peugeot','Mercedes','Toyota','Daewoo','Mini','Ford','Fiat','I','am','are','name','what','nationality','job','keyboard','operator','engineer','policeman','policewoman','taxi','air','postman','nurse','mechanic','hairdresser','housewife','milkman','hello','hi','how','today','well','fine','thanks','goodbye','see','fat','woman','thin','tall','short','dirty','clean','hot','cold','old','young','busy','lazy','whose','blue','perhaps','white','catch','father','mother','blouse','sister','tie','brother','his','her','colour','green','come','upstairs','smart','hat','same','lovely','case','carpet','dog','Customs','officer','girl','Danish','friend','Norwegian','passport','brown','tourist','Russian','Dutch','these','red','grey','yellow','black','orange','employee','hard‑working','sales','man','office','assistant','matter','children','tired','boy','thirsty','mum','sit','down','right','ice','cream','big','small','open','shut','light','heavy','long','shoe','grandfather','grandmother','give','one','which','empty','full','large','little','sharp','small','big','blunt','box','glass','cup','bottle','tin','knife','fork','on','shelf','desk','table','plate','cupboard','cigarette','television','floor','dressing','magazine','bed','newspaper','stereo','Mrs.','kitchen','refrigerator','right','electric','left','cooker','middle','of','room','cup','where','in','living','room','near','window','armchair','door','picture','wall','trousers','shut','bedroom','untidy','must','open','air','put','clothes','wardrobe','dust','sweep','empty','read','sharpen','put','on','take','turn','on','turn','off','garden','under','tree','climb','who','run','grass','after','cat','type','letter','basket','eat','bone','clean','tooth','cook','milk','meal','drink','tap','day','cloud','sky','sun','shine','with','family','walk','over','bridge','boat','river','ship','aeroplane','fly','sleep','shave','cry','wash','wait','jump','week','London','suddenly','bus','stop','smile','pleasantly','understand','speak','hand','pocket','phrasebook','phrase','slowly','hurriedly','cut','thirstily','go','greet','ago','buy','pair','fashion','uncomfortable','wear','appointment','urgent','till','shopping','list','vegetable','need','hope','thing','money','groceries','fruit','stationery','newsagent','chemist','bath','nearly','ready','dinner','restaurant','roast','breakfast','haircut','party','holiday','mess','pack','suitcase','leave','already','Paris','cinema','film','beautiful','city','never','ever','attendant','bring','garage','crash','lamp‑post','repair','try','believe','may','since','why','sell','because','retire','cost','pound','worth','penny','still','move','miss','neighbour','person','people','poor','pilot','return','New','York','Tokyo','Madrid','fly','Athens','Berlin','Bombay','Geneva','Moscow','Rome','Seoul','Stockholm','Sydney','return','train','platform','plenty','bar','station','catch','miss','leave','describe','zip','label','handle','address','pence','belong','ow','slip','fall','downstairs','hurt','back','stand','up','help','at','once','sure','X‑ray','Scotland','card','youth','hostel','association','soon','write','exam','pass','mathematics','question','easy','enough','paper','fail','answer','mark','rest','difficult','hate','low','cheer','guy','top','clever','stupid','cheap','expensive','fresh','stale','low','loud','high','hard','sweet','soft','sour','spell','intelligent','mistake','present','dictionary','carry','correct','madam','as','well','suit','pretty','idea','a','little','teaspoonful','less','a','few','pity','instead','advice','most','least','best','worse','worst','model','afford','deposit','instalment','price','millionaire','conductor','fare','change','note','passenger','none','neither','get','off','tramp','except','anyone','knock','everything','quiet','impossible','invite','anything','nothing','lemonade','joke','asleep','glasses','dining','room','coin','mouth','swallow','later','toilet','ring','story','happen','thief','enter','dark','torch','voice','parrot','exercise','book','customer','forget','manager','serve','counter','recognize','road','during','trip','travel','offer','job','guess','grow','beard','kitten','water','terribly','dry','nuisance','mean','surprise','immediately','famous','actress','at','least','actor','read','wave','track','mile','overtake','speed','dream','sign','driving','licence','charge','darling','Egypt','abroad','worry','reporter','sensational','mink','coat','future','get','married','hotel','latest','introduce','football','pool','win','world','poor','depend','extra','engineer','overseas','engineering','company','line','excited','get','on','middle‑aged','opposite','curiously','funny','powder','compact','kindly','ugly','amused','smile','embarrassed','worried','regularly','surround','wood','beauty','spot','hundred','city','through','visitor','tidy','litter','litter','basket','place','throw','rubbish','count','cover','piece','tyre','rusty','among','prosecute','Biff', 'Oh', 'Floppy', 'eggs', 'race', 'away', 'wet', 'shops', 'dogs'
+
+    ];
+
+    function loadWhitelist() {
+        try {
+            const raw = localStorage.getItem(LS_WHITELIST_KEY);
+            if (raw) {
+                const data = JSON.parse(raw);
+                if (Array.isArray(data) && data.length > 0) {
+                    return data;
+                }
+            }
+        } catch(e) {}
+        return [...DEFAULT_WHITELIST];
+    }
+
+    function saveWhitelist(list) {
+        try {
+            localStorage.setItem(LS_WHITELIST_KEY, JSON.stringify(list));
+        } catch(e) {}
+    }
+
+    let whitelist = loadWhitelist();
+
+    function isInWhitelist(word) {
+        if (!word) return false;
+        const lower = word.toLowerCase().replace(/[^a-z']/g, '');
+        if (whitelist.some(w => w.toLowerCase() === lower)) return true;
+        if (lower.endsWith('s')) {
+            const base = lower.slice(0, -1);
+            if (whitelist.some(w => w.toLowerCase() === base)) return true;
+            if (lower.endsWith('es')) {
+                const baseEs = lower.slice(0, -2);
+                if (whitelist.some(w => w.toLowerCase() === baseEs)) return true;
+            }
+            if (lower.endsWith('ies')) {
+                const baseIes = lower.slice(0, -3) + 'y';
+                if (whitelist.some(w => w.toLowerCase() === baseIes)) return true;
+            }
+        }
+        if (lower.endsWith('ed')) {
+            const base = lower.slice(0, -2);
+            if (whitelist.some(w => w.toLowerCase() === base)) return true;
+            if (lower.length > 3 && /[bcdfghjklmnpqrstvwxyz]{2}ed$/.test(lower)) {
+                const baseDouble = lower.slice(0, -3);
+                if (whitelist.some(w => w.toLowerCase() === baseDouble)) return true;
+            }
+        }
+        if (lower.endsWith('ing')) {
+            const base = lower.slice(0, -3);
+            if (whitelist.some(w => w.toLowerCase() === base)) return true;
+            if (lower.length > 4 && lower.endsWith('ing')) {
+                const baseE = lower.slice(0, -3) + 'e';
+                if (whitelist.some(w => w.toLowerCase() === baseE)) return true;
+            }
+            if (lower.length > 4 && /[bcdfghjklmnpqrstvwxyz]{2}ing$/.test(lower)) {
+                const baseDouble = lower.slice(0, -4);
+                if (whitelist.some(w => w.toLowerCase() === baseDouble)) return true;
+            }
+        }
+        if (lower.endsWith('er')) {
+            const base = lower.slice(0, -2);
+            if (whitelist.some(w => w.toLowerCase() === base)) return true;
+            if (lower.length > 3 && /[bcdfghjklmnpqrstvwxyz]{2}er$/.test(lower)) {
+                const baseDouble = lower.slice(0, -3);
+                if (whitelist.some(w => w.toLowerCase() === baseDouble)) return true;
+            }
+        }
+        if (lower.endsWith('est')) {
+            const base = lower.slice(0, -3);
+            if (whitelist.some(w => w.toLowerCase() === base)) return true;
+            if (lower.length > 4 && /[bcdfghjklmnpqrstvwxyz]{2}est$/.test(lower)) {
+                const baseDouble = lower.slice(0, -4);
+                if (whitelist.some(w => w.toLowerCase() === baseDouble)) return true;
+            }
+        }
+        if (lower.endsWith('ly')) {
+            const base = lower.slice(0, -2);
+            if (whitelist.some(w => w.toLowerCase() === base)) return true;
+            if (lower.endsWith('ally')) {
+                const baseAlly = lower.slice(0, -4);
+                if (whitelist.some(w => w.toLowerCase() === baseAlly)) return true;
+            }
+        }
+        if (lower.endsWith('ness')) {
+            const base = lower.slice(0, -4);
+            if (whitelist.some(w => w.toLowerCase() === base)) return true;
+            if (lower.endsWith('iness')) {
+                const baseIness = lower.slice(0, -5) + 'y';
+                if (whitelist.some(w => w.toLowerCase() === baseIness)) return true;
+            }
+        }
+        if (lower.startsWith('un')) {
+            const base = lower.slice(2);
+            if (whitelist.some(w => w.toLowerCase() === base)) return true;
+        }
+        if (lower.startsWith('in')) {
+            const base = lower.slice(2);
+            if (whitelist.some(w => w.toLowerCase() === base)) return true;
+        }
+        return false;
+    }
+
+    function renderWhitelistTags() {
+        const container = document.getElementById('whitelistTags');
+        if (!container) return;
+        container.innerHTML = '';
+        whitelist.forEach((word, idx) => {
+            const tag = document.createElement('span');
+            tag.className = 'whitelist-tag';
+            tag.textContent = word;
+            const remove = document.createElement('span');
+            remove.className = 'remove';
+            remove.textContent = '✕';
+            remove.title = '移除该单词';
+            remove.addEventListener('click', () => {
+                whitelist.splice(idx, 1);
+                saveWhitelist(whitelist);
+                renderWhitelistTags();
+            });
+            tag.appendChild(remove);
+            container.appendChild(tag);
+        });
+    }
+
+    function addToWhitelist(word) {
+        word = word.trim().toLowerCase();
+        if (!word) return false;
+        if (whitelist.some(w => w.toLowerCase() === word)) return false;
+        whitelist.push(word);
+        saveWhitelist(whitelist);
+        renderWhitelistTags();
+        return true;
+    }
+
+    function resetWhitelist() {
+        whitelist = [...DEFAULT_WHITELIST];
+        saveWhitelist(whitelist);
+        renderWhitelistTags();
+    }
+
+    /* =====================================================================
+       ===== 数据持久化核心 =====
+       ===================================================================== */
+    const sessionSrcCache = {};
+
+    // 核心图片加载函数：兼容本地目录和腾讯云COS
+    function pageSrc(page){
+        if(!page) return '';
+        // 1. 优先从 session 缓存 (Base64) 加载
+        if(page.file && sessionSrcCache[page.file]) {
+            return sessionSrcCache[page.file];
+        }
+        // 2. 如果页面本身有 src 属性（通常是 Base64 数据）
+        if(page.src) {
+            return page.src;
+        }
+        // 3. 从配置的 imgDir 加载（支持本地路径和COS地址）
+        if(page.file) {
+            const fileName = page.file;
+            // 判断 imgDir 是否为网络地址
+            if (imgDir.startsWith('http://') || imgDir.startsWith('https://')) {
+                // 网络地址：使用 encodeURIComponent 确保特殊字符被编码
+                // 但保留文件扩展名中的点号，避免被编码
+                const encodedFileName = encodeURIComponent(fileName).replace(/%2E/g, '.');
+                return imgDir + encodedFileName;
+            } else {
+                // 本地文件路径：使用 file:// 协议
+                return encodeURI('file://' + imgDir + fileName);
+            }
+        }
+        return '';
+    }
+
+    let library = [];
+    let selectedFolderId = null;
+    let currentStoryId = null;
+    let currentSpread = 0;
+    let collapsedNodes = new Set();
+    let dragData = null;
+
+    function saveLibrary(){
+        try{
+            const data = {
+                tree: library,
+                collapsed: [...collapsedNodes]
+            };
+            localStorage.setItem(LS_LIB_KEY, JSON.stringify(data));
+            if(selectedFolderId) localStorage.setItem(LS_FOLDER_KEY, selectedFolderId);
+            else localStorage.removeItem(LS_FOLDER_KEY);
+            localStorage.setItem(LS_COLLAPSED_KEY, JSON.stringify([...collapsedNodes]));
+        }catch(err){ console.warn('缓存失败', err); }
+    }
+
+    function loadLibraryData(){
+        try{
+            const raw = localStorage.getItem(LS_LIB_KEY);
+            if(!raw) return null;
+            const data = JSON.parse(raw);
+            if(!data || !data.tree || !Array.isArray(data.tree)) return null;
+            return data;
+        }catch(err){ 
+            console.warn('加载缓存失败', err);
+            return null;
+        }
+    }
+
+    function loadCollapsedState(){
+        try{
+            const raw = localStorage.getItem(LS_COLLAPSED_KEY);
+            if(raw){
+                const arr = JSON.parse(raw);
+                if(Array.isArray(arr)) return new Set(arr);
+            }
+        }catch(e){}
+        return new Set();
+    }
+
+    const loadedData = loadLibraryData();
+    if (loadedData && loadedData.tree && loadedData.tree.length > 0) {
+        library = loadedData.tree;
+        if (loadedData.collapsed) {
+            collapsedNodes = new Set(loadedData.collapsed);
+        } else {
+            collapsedNodes = loadCollapsedState();
+        }
+    } else {
+        library = [];
+        collapsedNodes = new Set();
+        saveLibrary();
+    }
+
+    const savedFolderId = localStorage.getItem(LS_FOLDER_KEY);
+    if (savedFolderId) {
+        const folder = findNodeById(library, savedFolderId);
+        if (folder && folder.type === 'folder') {
+            selectedFolderId = savedFolderId;
+        }
+    }
+
+    const allStories = getAllStories(library);
+    if (allStories.length > 0 && !currentStoryId) {
+        try {
+            const savedStoryId = localStorage.getItem('wib:currentStoryId');
+            if (savedStoryId && findNodeById(library, savedStoryId)) {
+                currentStoryId = savedStoryId;
+            } else {
+                currentStoryId = allStories[0].id;
+            }
+        } catch(e) {
+            currentStoryId = allStories[0].id;
+        }
+    }
+
+    /* =====================================================================
+       ===== 工具函数 =====
+       ===================================================================== */
+    function getRootNodes(){ return library; }
+
+    function getSelectedFolder(){
+        if(!selectedFolderId) return null;
+        return findNodeById(library, selectedFolderId);
+    }
+
+    function findNodeById(nodes, id){
+        if(!nodes || !Array.isArray(nodes)) return null;
+        for(const node of nodes){
+            if(node.id === id) return node;
+            if(node.type === 'folder' && node.children){
+                const found = findNodeById(node.children, id);
+                if(found) return found;
+            }
+        }
+        return null;
+    }
+
+    function findNodeIndex(parentNodes, id){
+        if(!parentNodes || !Array.isArray(parentNodes)) return -1;
+        for(let i=0; i<parentNodes.length; i++){
+            if(parentNodes[i].id === id) return i;
+        }
+        return -1;
+    }
+
+    function getNodeDepth(nodes, id, depth = 0){
+        if(!nodes || !Array.isArray(nodes)) return -1;
+        for(const node of nodes){
+            if(node.id === id) return depth;
+            if(node.type === 'folder' && node.children){
+                const d = getNodeDepth(node.children, id, depth + 1);
+                if(d !== -1) return d;
+            }
+        }
+        return -1;
+    }
+
+    function genId(){ return 'n' + Date.now() + '-' + Math.random().toString(36).slice(2, 6); }
+
+    function hasDuplicateName(parentNodes, name, excludeId = null){
+        if(!parentNodes || !Array.isArray(parentNodes)) return false;
+        for(const node of parentNodes){
+            if(node.id === excludeId) continue;
+            if(node.name === name) return true;
+        }
+        return false;
+    }
+
+    function getAllStories(nodes){
+        let stories = [];
+        if(!nodes || !Array.isArray(nodes)) return stories;
+        for(const node of nodes){
+            if(node.type === 'story'){
+                stories.push(node);
+            } else if(node.type === 'folder' && node.children){
+                stories = stories.concat(getAllStories(node.children));
+            }
+        }
+        return stories;
+    }
+
+    function setSelectedFolder(folderId){
+        selectedFolderId = folderId;
+        if(folderId){
+            const folder = findNodeById(library, folderId);
+            if(!folder || folder.type !== 'folder'){
+                selectedFolderId = null;
+            }
+        }
+        saveLibrary();
+        renderTree();
+        if(currentStoryId) localStorage.setItem('wib:currentStoryId', currentStoryId);
+    }
+
+    function getNodeSortKey(node){
+        if(node.sortKey !== undefined && node.sortKey !== null && node.sortKey !== Infinity){
+            return node.sortKey;
+        }
+        return Infinity;
+    }
+
+    function sortNodes(nodes){
+        if(!nodes || !Array.isArray(nodes)) return;
+        nodes.sort((a, b) => {
+            const keyA = getNodeSortKey(a);
+            const keyB = getNodeSortKey(b);
+            if(keyA !== keyB) return keyA - keyB;
+            return (a.name || a.title || '').localeCompare(b.name || b.title || '');
+        });
+        for(const node of nodes){
+            if(node.type === 'folder' && node.children){
+                sortNodes(node.children);
+            }
+        }
+    }
+
+    /* =====================================================================
+       ===== 导出 / 导入 备份（方案二：将图片数据存入备份文件） =====
+       ===================================================================== */
+    // 将图片转换为 Base64 数据
+    function getImageBase64(imgElement) {
+        return new Promise((resolve) => {
+            if (!imgElement) { resolve(null); return; }
+            try {
+                const canvas = document.createElement('canvas');
+                canvas.width = imgElement.naturalWidth || imgElement.width || 200;
+                canvas.height = imgElement.naturalHeight || imgElement.height || 200;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(imgElement, 0, 0);
+                resolve(canvas.toDataURL('image/jpeg', 0.85));
+            } catch(e) {
+                resolve(null);
+            }
+        });
+    }
+
+    // 增强的导出备份：包含图片 Base64 数据
+    async function exportBackup() {
+        // 收集所有需要导出的图片数据
+        const allPages = getAllPages(library);
+        const imageDataMap = {};
+
+        for (const page of allPages) {
+            if (page.file && sessionSrcCache[page.file]) {
+                // 如果缓存中有 Base64 数据，直接使用
+                imageDataMap[page.file] = sessionSrcCache[page.file];
+            } else if (page.file) {
+                // 尝试从 DOM 中获取已加载的图片
+                const imgElements = document.querySelectorAll('img');
+                for (const img of imgElements) {
+                    const src = img.getAttribute('src') || '';
+                    if (src.includes(encodeURIComponent(page.file)) || src.includes(page.file)) {
+                        const base64 = await getImageBase64(img);
+                        if (base64) {
+                            imageDataMap[page.file] = base64;
+                            break;
+                        }
+                    }
+                }
+                // 如果还没有获取到，尝试从 sessionSrcCache 中获取
+                if (!imageDataMap[page.file] && sessionSrcCache[page.file]) {
+                    imageDataMap[page.file] = sessionSrcCache[page.file];
+                }
+            }
+        }
+
+        // 构建备份数据
+        const backupData = {
+            version: '2.0', // 版本升级，标识包含图片数据
+            timestamp: new Date().toISOString(),
+            imgDir: imgDir,
+            tree: JSON.parse(JSON.stringify(library)),
+            selectedFolderId: selectedFolderId,
+            collapsed: [...collapsedNodes],
+            whitelist: whitelist,
+            currentStoryId: currentStoryId,
+            currentSpread: currentSpread,
+            imageData: imageDataMap // 新增：图片 Base64 数据
+        };
+
+        const jsonStr = JSON.stringify(backupData, null, 2);
+        // 如果数据太大，提示用户
+        if (jsonStr.length > 50 * 1024 * 1024) {
+            if (!confirm('备份文件较大（超过50MB），可能无法完整保存。建议分批次导出。\n\n是否继续？')) {
+                return;
+            }
+        }
+        const blob = new Blob([jsonStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `绘本目录备份_${new Date().toISOString().slice(0,10)}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    // 获取所有页面（递归遍历）
+    function getAllPages(nodes) {
+        const pages = [];
+        if (!nodes || !Array.isArray(nodes)) return pages;
+        for (const node of nodes) {
+            if (node.type === 'story' && node.pages) {
+                for (const page of node.pages) {
+                    if (page.file) pages.push(page);
+                }
+            } else if (node.type === 'folder' && node.children) {
+                pages.push(...getAllPages(node.children));
+            }
+        }
+        return pages;
+    }
+
+    // 增强的导入备份：恢复图片 Base64 数据
+    function importBackup(file) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const backupData = JSON.parse(e.target.result);
+                if (!backupData.tree || !Array.isArray(backupData.tree)) {
+                    alert('无效的备份文件：缺少目录树数据');
+                    return;
+                }
+
+                // 检查版本，提示用户
+                const isV2 = backupData.version === '2.0' || backupData.imageData;
+                if (!isV2) {
+                    if (!confirm('此备份文件为旧版本（不含图片数据），导入后图片可能无法显示。\n\n建议使用新版导出的备份文件。\n\n是否继续导入？')) {
+                        return;
+                    }
+                }
+
+                const totalStories = getAllStories(backupData.tree).length;
+                if (!confirm(`即将导入备份数据，将覆盖当前所有绘本目录及页面文本。\n备份时间：${backupData.timestamp || '未知'}\n绘本数：${totalStories}\n${isV2 ? '✅ 包含图片数据' : '⚠️ 不含图片数据'}\n\n确定要继续吗？`)) {
+                    return;
+                }
+
+                library = backupData.tree;
+                if (backupData.collapsed) {
+                    collapsedNodes = new Set(backupData.collapsed);
+                } else {
+                    collapsedNodes = new Set();
+                }
+                if (backupData.selectedFolderId) {
+                    const folder = findNodeById(library, backupData.selectedFolderId);
+                    selectedFolderId = folder ? backupData.selectedFolderId : null;
+                } else {
+                    selectedFolderId = null;
+                }
+                if (backupData.whitelist && Array.isArray(backupData.whitelist)) {
+                    whitelist = backupData.whitelist;
+                    saveWhitelist(whitelist);
+                    renderWhitelistTags();
+                }
+                if (backupData.imgDir) {
+                    imgDir = backupData.imgDir;
+                    if(!imgDir.endsWith('/')) imgDir += '/';
+                    localStorage.setItem(LS_DIR_KEY, imgDir);
+                }
+                if (backupData.currentStoryId) {
+                    const story = findNodeById(library, backupData.currentStoryId);
+                    currentStoryId = story ? backupData.currentStoryId : null;
+                    if (currentStoryId) {
+                        currentSpread = backupData.currentSpread || 0;
+                    }
+                } else {
+                    const allStories = getAllStories(library);
+                    currentStoryId = allStories.length > 0 ? allStories[0].id : null;
+                    currentSpread = 0;
+                }
+                if (currentStoryId) localStorage.setItem('wib:currentStoryId', currentStoryId);
+
+                // 恢复图片数据到 sessionSrcCache
+                if (backupData.imageData && typeof backupData.imageData === 'object') {
+                    Object.keys(backupData.imageData).forEach(key => {
+                        sessionSrcCache[key] = backupData.imageData[key];
+                    });
+                    // 将图片数据也保存到 localStorage 中，以便持久化
+                    try {
+                        localStorage.setItem('wib:imageCache', JSON.stringify(backupData.imageData));
+                    } catch(e) {
+                        console.warn('图片数据较大，无法全部存入 localStorage，将在会话中保留');
+                    }
+                }
+
+                // 如果是旧版本，尝试从本地路径加载图片（兼容旧版）
+                if (!backupData.imageData) {
+                    alert('⚠️ 此备份文件为旧版本，不含图片数据。\n\n请确保图片目录设置正确，否则图片将无法显示。');
+                }
+
+                saveLibrary();
+                renderAll(true);
+                alert(`✅ 备份导入成功！\n\n绘本目录及页面文本已恢复。\n${backupData.imageData ? '✅ 图片数据已恢复' : '⚠️ 请手动设置图片目录'}\n图片目录已更新为：${imgDir}`);
+            } catch(err) {
+                alert('❌ 导入失败：备份文件格式无效\n\n错误信息：' + err.message);
+                console.error(err);
+            }
+        };
+        reader.onerror = function() {
+            alert('读取文件失败，请重试');
+        };
+        reader.readAsText(file);
+    }
+
+    // 在页面加载时尝试恢复图片缓存
+    function restoreImageCache() {
+        try {
+            const cached = localStorage.getItem('wib:imageCache');
+            if (cached) {
+                const data = JSON.parse(cached);
+                if (typeof data === 'object') {
+                    Object.keys(data).forEach(key => {
+                        sessionSrcCache[key] = data[key];
+                    });
+                }
+            }
+        } catch(e) {}
+    }
+    restoreImageCache();
+
+    /* =====================================================================
+       ===== 解析文件名 =====
+       ===================================================================== */
+    function extractNumberPrefix(name) {
+        const match = name.match(/^(\d+)/);
+        if (match) {
+            return parseInt(match[1], 10);
+        }
+        return Infinity;
+    }
+
+    function extractStoryNumber(storyName) {
+        const match = storyName.match(/^(\d+)/);
+        if (match) {
+            return parseInt(match[1], 10);
+        }
+        return Infinity;
+    }
+
+    function analyzeFileName(name) {
+        const baseName = name.replace(/\.[^.]+$/, '');
+        let prefixNum = null;
+        let nameWithoutPrefix = baseName;
+        let prefixMatch = baseName.match(/^(\d+)[\s]*(.+)$/);
+        if (prefixMatch) {
+            prefixNum = parseInt(prefixMatch[1], 10);
+            nameWithoutPrefix = prefixMatch[2].trim();
+        } else {
+            prefixMatch = baseName.match(/^(\d+)$/);
+            if (prefixMatch) {
+                prefixNum = parseInt(prefixMatch[1], 10);
+                nameWithoutPrefix = '';
+            }
+        }
+
+        let storyName = '';
+        let pageNum = 1;
+
+        let match = nameWithoutPrefix.match(/^(.+?)[\s\-_]+([\d]+)$/);
+        if (match) {
+            storyName = match[1].trim();
+            pageNum = parseInt(match[2]) || 1;
+        } else {
+            match = nameWithoutPrefix.match(/^(.+?)([\d]+)$/);
+            if (match) {
+                storyName = match[1].trim();
+                pageNum = parseInt(match[2]) || 1;
+            } else {
+                const parts = nameWithoutPrefix.split(/[\s\-_]+/);
+                if (parts.length >= 2) {
+                    const lastPart = parts[parts.length - 1];
+                    if (/^\d+$/.test(lastPart)) {
+                        storyName = parts.slice(0, parts.length - 1).join(' ');
+                        pageNum = parseInt(lastPart) || 1;
+                    } else {
+                        storyName = nameWithoutPrefix.trim();
+                    }
+                } else {
+                    storyName = nameWithoutPrefix.trim();
+                }
+            }
+        }
+
+        if (!storyName && prefixNum !== null) {
+            storyName = String(prefixNum);
+        }
+
+        return { storyName, pageNum, prefixNum };
+    }
+
+    function analyzeFiles(files) {
+        const imageFiles = Array.from(files).filter(f => f.type.startsWith('image/'));
+        if (imageFiles.length === 0) {
+            alert('未选择任何图片文件');
+            return null;
+        }
+
+        imageFiles.sort((a, b) => {
+            const numA = extractNumberPrefix(a.name);
+            const numB = extractNumberPrefix(b.name);
+            if (numA !== numB) return numA - numB;
+            return a.name.localeCompare(b.name);
+        });
+
+        const groupMap = new Map();
+        for (const file of imageFiles) {
+            const { storyName, pageNum, prefixNum } = analyzeFileName(file.name);
+            if (!storyName) continue;
+
+            if (!groupMap.has(storyName)) {
+                groupMap.set(storyName, { items: [], prefixNum: prefixNum });
+            }
+            groupMap.get(storyName).items.push({ file, pageNum, name: file.name });
+        }
+
+        const groups = [];
+        for (const [name, data] of groupMap) {
+            data.items.sort((a, b) => a.pageNum - b.pageNum);
+            let sortKey = data.prefixNum !== null ? data.prefixNum : extractStoryNumber(name);
+            if (sortKey === Infinity) {
+                const numMatch = name.match(/^(\d+)/);
+                if (numMatch) sortKey = parseInt(numMatch[1], 10);
+            }
+            groups.push({
+                name: name,
+                pages: data.items,
+                status: 'pending',
+                sortKey: sortKey,
+                displayName: sortKey !== Infinity && sortKey !== null ? `${String(sortKey).padStart(2, '0')} ${name}` : name
+            });
+        }
+
+        groups.sort((a, b) => {
+            if (a.sortKey !== b.sortKey) return a.sortKey - b.sortKey;
+            return a.name.localeCompare(b.name);
+        });
+
+        groups.forEach((g, idx) => {
+            g.sortKey = idx + 1;
+            g.displayName = `${String(g.sortKey).padStart(2, '0')} ${g.name}`;
+        });
+
+        return groups;
+    }
+
+    /* =====================================================================
+       ===== 创建/管理绘本 =====
+       ===================================================================== */
+    function createStory(parentId, title, sortKey = Infinity){
+        const parentNodes = parentId ? findNodeById(library, parentId)?.children : library;
+        if(!parentNodes) return null;
+        if(parentNodes.length >= 100) { alert('内容过多'); return null; }
+
+        const story = {
+            id: genId(),
+            type: 'story',
+            title: title,
+            builtin: false,
+            pages: [],
+            sortKey: sortKey
+        };
+        parentNodes.push(story);
+        sortNodes(parentNodes);
+        saveLibrary();
+        renderTree();
+        return story;
+    }
+
+    function createFolder(parentId, name){
+        const parentNodes = parentId ? findNodeById(library, parentId)?.children : library;
+        if(!parentNodes) return null;
+        if(parentNodes.length >= 100) { alert('文件夹内容过多'); return null; }
+        if(hasDuplicateName(parentNodes, name)) { alert('名称已存在'); return null; }
+
+        const depth = parentId ? getNodeDepth(library, parentId) + 1 : 0;
+        if(depth > 3) { alert('最多支持3级文件夹'); return null; }
+
+        const folder = {
+            id: genId(),
+            type: 'folder',
+            name: name,
+            children: [],
+            sortKey: Infinity
+        };
+        parentNodes.push(folder);
+        sortNodes(parentNodes);
+        saveLibrary();
+        renderTree();
+        return folder;
+    }
+
+    function deleteFolder(folderId){
+        const folder = findNodeById(library, folderId);
+        if(!folder || folder.type !== 'folder') return;
+
+        if(folder.children && folder.children.length > 0){
+            alert(`文件夹 "${folder.name}" 不为空，请先清空其中的内容后再删除。`);
+            return;
+        }
+
+        if(!confirm(`确定要删除空文件夹 "${folder.name}" 吗？`)) return;
+
+        const parent = findParentNode(library, folderId);
+        if(parent){
+            const idx = parent.children.findIndex(n => n.id === folderId);
+            if(idx !== -1) parent.children.splice(idx, 1);
+            sortNodes(parent.children);
+        } else {
+            const idx = library.findIndex(n => n.id === folderId);
+            if(idx !== -1) library.splice(idx, 1);
+            sortNodes(library);
+        }
+
+        if(selectedFolderId === folderId) selectedFolderId = null;
+        saveLibrary();
+        renderTree();
+    }
+
+    function findParentNode(nodes, childId){
+        if(!nodes || !Array.isArray(nodes)) return null;
+        for(const node of nodes){
+            if(node.type === 'folder' && node.children){
+                if(node.children.some(n => n.id === childId)) return node;
+                const found = findParentNode(node.children, childId);
+                if(found) return found;
+            }
+        }
+        return null;
+    }
+
+    function renameFolder(folderId, newName){
+        const folder = findNodeById(library, folderId);
+        if(!folder || folder.type !== 'folder') return false;
+        const parent = findParentNode(library, folderId);
+        const parentNodes = parent ? parent.children : library;
+        if(hasDuplicateName(parentNodes, newName, folderId)) { alert('名称已存在'); return false; }
+        folder.name = newName;
+        saveLibrary();
+        renderTree();
+        return true;
+    }
+
+    function deleteStoryById(storyId){
+        const story = findNodeById(library, storyId);
+        if(!story || story.type !== 'story') return;
+        if(!confirm(`确定要删除绘本《${story.title}》吗？此操作不可恢复。`)) return;
+
+        const parent = findParentNode(library, storyId);
+        if(parent){
+            const idx = parent.children.findIndex(n => n.id === storyId);
+            if(idx !== -1) parent.children.splice(idx, 1);
+            sortNodes(parent.children);
+        } else {
+            const idx = library.findIndex(n => n.id === storyId);
+            if(idx !== -1) library.splice(idx, 1);
+            sortNodes(library);
+        }
+
+        if(currentStoryId === storyId){
+            const allStories = getAllStories(library);
+            currentStoryId = allStories.length > 0 ? allStories[allStories.length-1].id : null;
+            currentSpread = 0;
+            if(currentStoryId) localStorage.setItem('wib:currentStoryId', currentStoryId);
+        }
+        saveLibrary();
+        renderAll(true);
+    }
+
+    function updateStoryTitle(storyId, newTitle){
+        const story = findNodeById(library, storyId);
+        if(!story || story.type !== 'story') return false;
+        story.title = newTitle;
+        saveLibrary();
+        renderTree();
+        return true;
+    }
+
+    function moveNode(nodeId, targetId, position){
+        const node = findNodeById(library, nodeId);
+        if(!node) return false;
+
+        const parent = findParentNode(library, nodeId);
+        const parentNodes = parent ? parent.children : library;
+
+        const targetParent = findParentNode(library, targetId);
+        const targetParentNodes = targetParent ? targetParent.children : library;
+
+        if(parentNodes === targetParentNodes){
+            const fromIdx = parentNodes.findIndex(n => n.id === nodeId);
+            const toIdx = parentNodes.findIndex(n => n.id === targetId);
+            if(fromIdx === -1 || toIdx === -1) return false;
+            const [removed] = parentNodes.splice(fromIdx, 1);
+            const insertIdx = fromIdx < toIdx ? toIdx - 1 : toIdx;
+            parentNodes.splice(insertIdx, 0, removed);
+            parentNodes.forEach((n, i) => {
+                n.sortKey = i + 1;
+            });
+            saveLibrary();
+            renderTree();
+            return true;
+        }
+
+        const fromIdx = parentNodes.findIndex(n => n.id === nodeId);
+        if(fromIdx === -1) return false;
+        const [removed] = parentNodes.splice(fromIdx, 1);
+        sortNodes(parentNodes);
+
+        const toIdx = targetParentNodes.findIndex(n => n.id === targetId);
+        if(toIdx === -1) return false;
+        const insertIdx = position === 'before' ? toIdx : toIdx + 1;
+        targetParentNodes.splice(insertIdx, 0, removed);
+        targetParentNodes.forEach((n, i) => {
+            n.sortKey = i + 1;
+        });
+
+        saveLibrary();
+        renderTree();
+        return true;
+    }
+
+    function getCurrentStory(){
+        if(!currentStoryId) {
+            const allStories = getAllStories(library);
+            if(allStories.length > 0) {
+                currentStoryId = allStories[0].id;
+                localStorage.setItem('wib:currentStoryId', currentStoryId);
+            } else {
+                return null;
+            }
+        }
+        const story = findNodeById(library, currentStoryId);
+        if(!story || story.type !== 'story'){
+            const allStories = getAllStories(library);
+            if(allStories.length > 0) {
+                currentStoryId = allStories[allStories.length-1].id;
+                localStorage.setItem('wib:currentStoryId', currentStoryId);
+                return findNodeById(library, currentStoryId);
+            }
+            return null;
+        }
+        return story;
+    }
+
+    function totalSpreads(story){ return Math.max(1, Math.ceil(story.pages.length / 2)); }
+
+    let searchQuery = '';
+
+    /* =====================================================================
+       DOM refs
+       ===================================================================== */
+    const treeEl = document.getElementById('tree');
+    const spreadEl = document.getElementById('spread');
+    const spreadTag = document.getElementById('spreadTag');
+    const storyCaption = document.getElementById('storyCaption');
+    const prevBtn = document.getElementById('prevBtn');
+    const nextBtn = document.getElementById('nextBtn');
+    const voiceSelect = document.getElementById('voiceSelect');
+    const rateRange = document.getElementById('rateRange');
+    const sidebar = document.getElementById('sidebar');
+    const mobileMenuBtn = document.getElementById('mobileMenuBtn');
+    const searchInput = document.getElementById('searchInput');
+    const searchBtn = document.getElementById('searchBtn');
+    const clearSearchBtn = document.getElementById('clearSearchBtn');
+
+    /* =====================================================================
+       Speech
+       ===================================================================== */
+    let voices = [];
+    function loadVoices(){
+        voices = speechSynthesis.getVoices();
+        const rank = v => {
+            const n = (v.name+v.lang).toLowerCase();
+            let score = 0;
+            if(v.lang && v.lang.toLowerCase().startsWith('en')) score += 10;
+            if(n.includes('male')) score += 5;
+            if(n.includes('daniel') || n.includes('george') || n.includes('david') || n.includes('fred') || n.includes('google uk english male')) score += 8;
+            if(n.includes('female')) score -= 3;
+            return score;
+        };
+        const sorted = voices.slice().sort((a,b)=> rank(b)-rank(a));
+        voiceSelect.innerHTML = '';
+        sorted.forEach(v=>{
+            const opt = document.createElement('option');
+            opt.value = v.name;
+            opt.textContent = `${v.name} (${v.lang})`;
+            voiceSelect.appendChild(opt);
+        });
+        if(sorted.length) voiceSelect.value = sorted[0].name;
+    }
+    if('speechSynthesis' in window){
+        loadVoices();
+        speechSynthesis.onvoiceschanged = loadVoices;
+    }
+
+    function makeUtterance(text){
+        const utter = new SpeechSynthesisUtterance(text);
+        const chosen = voices.find(v=>v.name === voiceSelect.value);
+        if(chosen) utter.voice = chosen;
+        utter.rate = parseFloat(rateRange.value);
+        utter.pitch = 0.92;
+        return utter;
+    }
+
+    function speakOne(text, indicatorEl){
+        if(!('speechSynthesis' in window) || !text) return;
+        speechSynthesis.cancel();
+        const utter = makeUtterance(text);
+        if(indicatorEl){
+            utter.onstart = ()=> indicatorEl.classList.add('speaking');
+            utter.onend = ()=> indicatorEl.classList.remove('speaking');
+            utter.onerror = ()=> indicatorEl.classList.remove('speaking');
+        }
+        speechSynthesis.speak(utter);
+    }
+
+    function speakSequence(items){
+        if(!('speechSynthesis' in window) || !items.length) return;
+        speechSynthesis.cancel();
+        let i = 0;
+        function next(){
+            if(i >= items.length) return;
+            const { text, indicatorEl } = items[i++];
+            const utter = makeUtterance(text);
+            if(indicatorEl){
+                utter.onstart = ()=> indicatorEl.classList.add('speaking');
+            }
+            utter.onend = ()=>{ if(indicatorEl) indicatorEl.classList.remove('speaking'); next(); };
+            utter.onerror = ()=>{ if(indicatorEl) indicatorEl.classList.remove('speaking'); next(); };
+            speechSynthesis.speak(utter);
+        }
+        next();
+    }
+
+    /* =====================================================================
+       Tree rendering
+       ===================================================================== */
+    function renderTree(){
+        treeEl.innerHTML = '';
+        const q = searchQuery.trim().toLowerCase();
+
+        if(q){
+            renderSearchResults(q);
+            return;
+        }
+
+        if(library.length === 0){
+            const empty = document.createElement('div');
+            empty.className = 'empty-hint';
+            empty.textContent = '📖 还没有内容，点击「新建」或「批量导入绘本」或「新增绘本」开始创建';
+            empty.style.padding = '20px 10px';
+            empty.style.textAlign = 'center';
+            empty.style.fontSize = '14px';
+            treeEl.appendChild(empty);
+            return;
+        }
+
+        sortNodes(library);
+        renderNodes(library, treeEl, 0);
+    }
+
+    function renderNodes(nodes, container, depth){
+        if(!nodes || !Array.isArray(nodes)) return;
+        for(const node of nodes){
+            if(node.type === 'folder'){
+                const isCollapsed = collapsedNodes.has(node.id);
+                const isSelected = selectedFolderId === node.id;
+                const hasChildren = node.children && node.children.length > 0;
+
+                const div = document.createElement('div');
+                div.className = 'tree-node folder-node';
+                div.dataset.id = node.id;
+
+                const row = document.createElement('div');
+                row.className = 'node-row' + (isSelected ? ' folder-selected' : '');
+                row.draggable = false;
+                const depthClass = depth > 0 ? `depth-indent-${Math.min(depth, 3)}` : '';
+                if(depthClass) row.classList.add(depthClass);
+
+                const caret = document.createElement('span');
+                caret.className = 'node-caret' + (isCollapsed ? ' collapsed' : '') + (hasChildren ? '' : ' no-children');
+                caret.textContent = hasChildren ? '▾' : '▪';
+                caret.addEventListener('click', (e)=>{
+                    e.stopPropagation();
+                    if(hasChildren) toggleNodeCollapse(node.id);
+                });
+                row.appendChild(caret);
+
+                const icon = document.createElement('span');
+                icon.className = 'node-icon';
+                icon.textContent = '📁';
+                row.appendChild(icon);
+
+                const title = document.createElement('span');
+                title.className = 'node-title';
+                title.textContent = node.name + ` (${node.children.length})`;
+                row.appendChild(title);
+
+                const actions = document.createElement('span');
+                actions.className = 'node-actions';
+
+                const addFolderBtn = document.createElement('button');
+                addFolderBtn.className = 'node-btn folder-add';
+                addFolderBtn.textContent = '📁+';
+                addFolderBtn.title = '在此文件夹下新建子文件夹';
+                addFolderBtn.addEventListener('click', (e)=>{
+                    e.stopPropagation();
+                    if(depth >= 3) { alert('最多支持3级文件夹'); return; }
+                    openNewFolderModal(node.id);
+                });
+                actions.appendChild(addFolderBtn);
+
+                const renameBtn = document.createElement('button');
+                renameBtn.className = 'node-btn';
+                renameBtn.textContent = '✏️';
+                renameBtn.title = '重命名文件夹';
+                renameBtn.addEventListener('click', (e)=>{
+                    e.stopPropagation();
+                    openRenameFolderModal(node.id);
+                });
+                actions.appendChild(renameBtn);
+
+                const delBtn = document.createElement('button');
+                delBtn.className = 'node-btn danger';
+                delBtn.textContent = '🗑️';
+                delBtn.title = '删除文件夹';
+                delBtn.addEventListener('click', (e)=>{
+                    e.stopPropagation();
+                    deleteFolder(node.id);
+                });
+                actions.appendChild(delBtn);
+
+                row.appendChild(actions);
+
+                row.addEventListener('click', (e)=>{
+                    if(hasChildren) toggleNodeCollapse(node.id);
+                    setSelectedFolder(node.id);
+                });
+
+                div.appendChild(row);
+
+                if(!isCollapsed && hasChildren){
+                    const childrenContainer = document.createElement('div');
+                    childrenContainer.className = 'tree-children';
+                    renderNodes(node.children, childrenContainer, depth + 1);
+                    div.appendChild(childrenContainer);
+                } else if(!isCollapsed && !hasChildren){
+                    const empty = document.createElement('div');
+                    empty.className = 'empty-hint';
+                    empty.textContent = '（空文件夹）';
+                    empty.style.paddingLeft = (depth + 1) * 16 + 20 + 'px';
+                    div.appendChild(empty);
+                }
+
+                container.appendChild(div);
+
+            } else if(node.type === 'story'){
+                const isCurrent = currentStoryId === node.id;
+                const sortKey = node.sortKey !== undefined && node.sortKey !== Infinity ? node.sortKey : null;
+                const isCollapsed = collapsedNodes.has(node.id);
+                const hasPages = node.pages && node.pages.length > 0;
+
+                const div = document.createElement('div');
+                div.className = 'tree-node';
+                div.dataset.id = node.id;
+                div.dataset.type = 'story';
+
+                const row = document.createElement('div');
+                row.className = 'node-row' + (isCurrent ? ' current' : '');
+                row.draggable = true;
+                const depthClass = depth > 0 ? `depth-indent-${Math.min(depth, 3)}` : '';
+                if(depthClass) row.classList.add(depthClass);
+
+                row.addEventListener('dragstart', (e) => {
+                    dragData = { id: node.id, type: 'story' };
+                    row.classList.add('dragging');
+                    e.dataTransfer.effectAllowed = 'move';
+                });
+                row.addEventListener('dragend', (e) => {
+                    row.classList.remove('dragging');
+                    document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+                });
+                row.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    row.classList.add('drag-over');
+                });
+                row.addEventListener('dragleave', (e) => {
+                    row.classList.remove('drag-over');
+                });
+                row.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    row.classList.remove('drag-over');
+                    if(!dragData || dragData.id === node.id) return;
+                    moveNode(dragData.id, node.id, 'before');
+                    dragData = null;
+                });
+
+                const dragHandle = document.createElement('span');
+                dragHandle.className = 'node-btn drag-handle';
+                dragHandle.textContent = '⠿';
+                dragHandle.title = '拖拽调整顺序';
+                dragHandle.style.cursor = 'grab';
+                row.appendChild(dragHandle);
+
+                const caret = document.createElement('span');
+                caret.className = 'node-caret' + (isCollapsed ? ' collapsed' : '') + (hasPages ? '' : ' no-children');
+                caret.textContent = hasPages ? '▾' : '▪';
+                caret.addEventListener('click', (e)=>{
+                    e.stopPropagation();
+                    if(hasPages) toggleNodeCollapse(node.id);
+                });
+                row.appendChild(caret);
+
+                const icon = document.createElement('span');
+                icon.className = 'node-icon';
+                icon.textContent = '📖';
+                row.appendChild(icon);
+
+                const title = document.createElement('span');
+                title.className = 'node-title';
+                const displayTitle = sortKey !== null ? `${String(sortKey).padStart(2, '0')} ${node.title}` : node.title;
+                title.textContent = displayTitle + ` (${node.pages.length}页)`;
+                row.appendChild(title);
+
+                if(node.pages.length > 0){
+                    const badge = document.createElement('span');
+                    badge.className = 'node-badge';
+                    badge.textContent = node.pages.length;
+                    row.appendChild(badge);
+                }
+
+                const actions = document.createElement('span');
+                actions.className = 'node-actions';
+
+                const editBtn = document.createElement('button');
+                editBtn.className = 'node-btn';
+                editBtn.textContent = '✏️';
+                editBtn.title = '编辑绘本名称';
+                editBtn.addEventListener('click', (e)=>{
+                    e.stopPropagation();
+                    openStoryModal('rename', node.id);
+                });
+                actions.appendChild(editBtn);
+
+                const delBtn = document.createElement('button');
+                delBtn.className = 'node-btn danger';
+                delBtn.textContent = '🗑️';
+                delBtn.title = '删除绘本';
+                delBtn.addEventListener('click', (e)=>{
+                    e.stopPropagation();
+                    deleteStoryById(node.id);
+                });
+                actions.appendChild(delBtn);
+
+                row.appendChild(actions);
+
+                row.addEventListener('click', (e) => {
+                    if(e.target.closest('.drag-handle') || e.target.closest('.node-btn')) return;
+                    if(hasPages) toggleNodeCollapse(node.id);
+                    currentStoryId = node.id;
+                    currentSpread = 0;
+                    localStorage.setItem('wib:currentStoryId', currentStoryId);
+                    renderAll(true);
+                });
+
+                div.appendChild(row);
+
+                if(!isCollapsed && hasPages){
+                    const pageList = document.createElement('div');
+                    pageList.className = 'page-list';
+                    node.pages.forEach((page, pIdx) => {
+                        const pDiv = document.createElement('div');
+                        pDiv.className = 'page-list-item' + (isCurrent && Math.floor(pIdx/2) === currentSpread ? ' current' : '');
+                        const dot = document.createElement('span');
+                        dot.className = 'pl-dot';
+                        pDiv.appendChild(dot);
+                        const text = document.createElement('span');
+                        text.className = 'pl-text';
+                        text.textContent = `${pIdx+1}. ${page.text || '（无文字）'}`;
+                        pDiv.appendChild(text);
+                        const delPage = document.createElement('button');
+                        delPage.className = 'pl-del';
+                        delPage.textContent = '✕';
+                        delPage.title = '删除此页面';
+                        delPage.addEventListener('click', (e)=>{
+                            e.stopPropagation();
+                            deletePageFromStory(node.id, pIdx);
+                        });
+                        pDiv.appendChild(delPage);
+                        pDiv.addEventListener('click', (e)=>{
+                            if(e.target.closest('.pl-del')) return;
+                            currentStoryId = node.id;
+                            currentSpread = Math.floor(pIdx/2);
+                            localStorage.setItem('wib:currentStoryId', currentStoryId);
+                            renderAll(true);
+                        });
+                        pageList.appendChild(pDiv);
+                    });
+                    div.appendChild(pageList);
+                } else if(!isCollapsed && !hasPages){
+                    const empty = document.createElement('div');
+                    empty.className = 'empty-hint';
+                    empty.textContent = '（还没有页面，点击右上角添加）';
+                    empty.style.paddingLeft = (depth + 1) * 16 + 20 + 'px';
+                    div.appendChild(empty);
+                }
+
+                container.appendChild(div);
+            }
+        }
+    }
+
+    function deletePageFromStory(storyId, pageIdx){
+        const story = findNodeById(library, storyId);
+        if(!story || story.type !== 'story') return;
+        if(story.pages.length <= 1){
+            alert('至少保留一页。如需删除整本绘本，请在目录中删除整个绘本。');
+            return;
+        }
+        if(!confirm(`确定要删除第 ${pageIdx+1} 页吗？`)) return;
+        story.pages.splice(pageIdx, 1);
+        const total = totalSpreads(story);
+        if(currentSpread >= total) currentSpread = Math.max(0, total - 1);
+        saveLibrary();
+        renderAll(true);
+    }
+
+    function toggleNodeCollapse(nodeId){
+        if(collapsedNodes.has(nodeId)){
+            collapsedNodes.delete(nodeId);
+        } else {
+            collapsedNodes.add(nodeId);
+        }
+        saveLibrary();
+        renderTree();
+    }
+
+    function renderSearchResults(q){
+        const results = [];
+        function searchNodes(nodes, path = []){
+            if(!nodes || !Array.isArray(nodes)) return;
+            for(const node of nodes){
+                const fullPath = [...path, node.name || node.title];
+                const match = node.name?.toLowerCase().includes(q) || node.title?.toLowerCase().includes(q);
+                if(match){
+                    results.push({ node, path: fullPath });
+                }
+                if(node.type === 'folder' && node.children){
+                    searchNodes(node.children, fullPath);
+                }
+            }
+        }
+        searchNodes(library);
+
+        if(results.length === 0){
+            const empty = document.createElement('div');
+            empty.className = 'empty-hint';
+            empty.textContent = '🔍 没有匹配的内容';
+            treeEl.appendChild(empty);
+            return;
+        }
+
+        const container = document.createElement('div');
+        for(const { node, path } of results){
+            const row = document.createElement('div');
+            row.className = 'tree-node';
+
+            const inner = document.createElement('div');
+            inner.className = 'node-row';
+            inner.style.padding = '6px 10px';
+
+            const icon = document.createElement('span');
+            icon.className = 'node-icon';
+            icon.textContent = node.type === 'folder' ? '📁' : '📖';
+            inner.appendChild(icon);
+
+            const title = document.createElement('span');
+            title.className = 'node-title';
+            const sortLabel = node.sortKey !== undefined && node.sortKey !== Infinity ? `${String(node.sortKey).padStart(2, '0')} ` : '';
+            title.textContent = sortLabel + (node.name || node.title) + (node.type === 'folder' ? ` (${node.children.length})` : ` (${node.pages?.length || 0}页)`);
+            inner.appendChild(title);
+
+            const pathSpan = document.createElement('span');
+            pathSpan.style.fontSize = '10px';
+            pathSpan.style.color = '#8a7a5c';
+            pathSpan.style.marginLeft = '6px';
+            pathSpan.textContent = `📍 ${path.join(' / ')}`;
+            inner.appendChild(pathSpan);
+
+            inner.addEventListener('click', ()=>{
+                if(node.type === 'folder'){
+                    setSelectedFolder(node.id);
+                    searchInput.value = '';
+                    searchQuery = '';
+                    renderTree();
+                } else {
+                    currentStoryId = node.id;
+                    currentSpread = 0;
+                    localStorage.setItem('wib:currentStoryId', currentStoryId);
+                    renderAll(true);
+                    searchInput.value = '';
+                    searchQuery = '';
+                    renderTree();
+                }
+            });
+
+            row.appendChild(inner);
+            container.appendChild(row);
+        }
+        treeEl.appendChild(container);
+    }
+
+    /* =====================================================================
+       Spread rendering
+       ===================================================================== */
+    function buildPagePanel(page, globalIndex){
+        const panel = document.createElement('div');
+        panel.className = 'page-panel';
+
+        if(!page){
+            panel.classList.add('empty');
+            const msg = document.createElement('div');
+            msg.className = 'empty-msg';
+            msg.textContent = '🌙 The End';
+            panel.appendChild(msg);
+            return panel;
+        }
+
+        const imgBox = document.createElement('div');
+        imgBox.className = 'page-img-box';
+        const img = document.createElement('img');
+        // 不带 Referer 请求图片：避免触发 COS/CDN 的防盗链（Referer 白名单）拦截
+        img.referrerPolicy = 'no-referrer';
+        // 使用优化后的 pageSrc 函数加载图片
+        const imgSrc = pageSrc(page);
+        if (imgSrc) {
+            img.src = imgSrc;
+        } else {
+            // 如果没有图片源，显示占位提示
+            img.alt = '图片未找到';
+            img.style.display = 'none';
+            const miss = document.createElement('div');
+            miss.className = 'missing-img';
+            miss.textContent = '⚠️ 未找到图片：' + (page.file || '未知文件');
+            imgBox.appendChild(miss);
+        }
+        img.alt = page.text || ('第 ' + (globalIndex+1) + ' 页');
+        let imgRetried = false;
+        img.addEventListener('error', ()=>{
+            // 网络地址先自动重试一次（可能是瞬时抖动），本地 file:// 地址重试没有意义，直接跳过
+            const isRemote = imgDir.startsWith('http://') || imgDir.startsWith('https://');
+            if (isRemote && !imgRetried && imgSrc) {
+                imgRetried = true;
+                setTimeout(()=>{ img.src = imgSrc + (imgSrc.includes('?') ? '&' : '?') + '_retry=' + Date.now(); }, 500);
+                return;
+            }
+            if(imgBox.querySelector('.missing-img')) return;
+            const miss = document.createElement('div');
+            miss.className = 'missing-img';
+            if (isRemote) {
+                miss.innerHTML = '⚠️ 图片加载失败：' + imgDir + (page.file || '') +
+                    '<br><br>地址在浏览器地址栏能直接打开，但在本页面里加载不出来，通常是腾讯云 COS 存储桶开启了"防盗链"（Referer 白名单），拒绝了来自本页面的请求。请到 COS 控制台 → 存储桶 → 安全管理 → 防盗链设置，关闭防盗链，或把"允许空 Referer"打开 / 把本页面所在的域名加入白名单；同时确认存储桶的读写权限是"公有读"。';
+            } else {
+                miss.textContent = '⚠️ 图片加载失败：' + imgDir + (page.file || '') + '（本地路径需要在受支持的浏览器中通过 file:// 直接打开本页面，且路径、文件名需与实际一致）';
+            }
+            imgBox.appendChild(miss);
+        });
+        imgBox.appendChild(img);
+
+        const captionBar = document.createElement('div');
+        captionBar.className = 'page-caption-bar';
+        const speaker = document.createElement('div');
+        speaker.className = 'mini-speaker';
+        speaker.textContent = '🔊';
+        captionBar.appendChild(speaker);
+        const captionText = document.createElement('div');
+        captionText.className = 'caption-text';
+        captionBar.appendChild(captionText);
+
+        fillCaption(captionText, page.text);
+
+        speaker.addEventListener('click', ()=> speakOne(page.text || 'This page has no words.', speaker));
+        imgBox.addEventListener('click', (e)=>{
+            spawnRipple(e, imgBox);
+            speakOne(page.text || 'This page has no words.', speaker);
+        });
+
+        const editBtn = document.createElement('div');
+        editBtn.className = 'mini-edit-btn';
+        editBtn.textContent = '✏️';
+        editBtn.title = '编辑本页朗读文字';
+        editBtn.addEventListener('click', ()=> startEditPageText(page, captionBar, captionText, editBtn));
+        captionBar.appendChild(editBtn);
+
+        panel.appendChild(imgBox);
+        panel.appendChild(captionBar);
+        return panel;
+    }
+
+    function startEditPageText(page, captionBar, captionText, editBtn){
+        if('speechSynthesis' in window) speechSynthesis.cancel();
+        captionText.style.display = 'none';
+        editBtn.style.display = 'none';
+
+        const area = document.createElement('div');
+        area.className = 'page-edit-area';
+
+        const ta = document.createElement('textarea');
+        ta.value = page.text || '';
+        ta.placeholder = '输入这一页要朗读的文字…';
+        area.appendChild(ta);
+
+        const saveBtn = document.createElement('button');
+        saveBtn.className = 'pe-btn save';
+        saveBtn.textContent = '保存';
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'pe-btn cancel';
+        cancelBtn.textContent = '取消';
+        area.appendChild(saveBtn);
+        area.appendChild(cancelBtn);
+
+        captionBar.appendChild(area);
+
+        function finish(){
+            captionText.style.display = '';
+            editBtn.style.display = '';
+            area.remove();
+        }
+        saveBtn.addEventListener('click', ()=>{
+            page.text = ta.value.trim();
+            finish();
+            fillCaption(captionText, page.text);
+            renderTree();
+            saveLibrary();
+        });
+        cancelBtn.addEventListener('click', finish);
+        ta.addEventListener('keydown', (e)=>{
+            e.stopPropagation();
+            if(e.key === 'Enter' && (e.metaKey || e.ctrlKey)) saveBtn.click();
+            if(e.key === 'Escape') cancelBtn.click();
+        });
+        setTimeout(()=> ta.focus(), 30);
+    }
+
+    function fillCaption(container, text){
+        container.innerHTML = '';
+        container.classList.remove('truncated');
+        if(!text){
+            const span = document.createElement('span');
+            span.style.opacity = 0.5;
+            span.style.fontStyle = 'italic';
+            span.textContent = '（无朗读文本）';
+            container.appendChild(span);
+            return;
+        }
+
+        const words = text.trim().split(/\s+/).filter(w => w.length > 0);
+        if (words.length === 0) {
+            const span = document.createElement('span');
+            span.style.opacity = 0.5;
+            span.style.fontStyle = 'italic';
+            span.textContent = '（无朗读文本）';
+            container.appendChild(span);
+            return;
+        }
+
+        const fullText = words.join(' ');
+        const fullSpan = document.createElement('span');
+        fullSpan.style.display = 'inline';
+        fullSpan.style.whiteSpace = 'nowrap';
+        fullSpan.textContent = fullText;
+        container.appendChild(fullSpan);
+
+        requestAnimationFrame(() => {
+            const isOverflow = fullSpan.scrollWidth > container.clientWidth;
+            if (isOverflow) {
+                container.removeChild(fullSpan);
+                let displayWords = [];
+                for (let i = 0; i < words.length; i++) {
+                    const test = displayWords.concat(words[i]).join(' ');
+                    const tmp = document.createElement('span');
+                    tmp.style.display = 'inline';
+                    tmp.style.whiteSpace = 'nowrap';
+                    tmp.textContent = test + '......';
+                    container.appendChild(tmp);
+                    const overflow = tmp.scrollWidth > container.clientWidth;
+                    container.removeChild(tmp);
+                    if (overflow) break;
+                    displayWords.push(words[i]);
+                }
+                if (displayWords.length === 0 && words.length > 0) {
+                    displayWords = [words[0]];
+                }
+                container.innerHTML = '';
+                const finalText = displayWords.join(' ');
+                const span = document.createElement('span');
+                span.style.display = 'inline';
+                span.style.whiteSpace = 'nowrap';
+                span.textContent = finalText;
+                container.appendChild(span);
+                const ellipsisSpan = document.createElement('span');
+                ellipsisSpan.textContent = '......';
+                ellipsisSpan.style.fontWeight = '700';
+                ellipsisSpan.style.color = 'var(--clay)';
+                ellipsisSpan.style.marginLeft = '2px';
+                ellipsisSpan.className = 'word';
+                ellipsisSpan.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    speakOne(fullText, container.closest('.page-panel')?.querySelector('.mini-speaker'));
+                });
+                container.appendChild(ellipsisSpan);
+                container.classList.add('truncated');
+            } else {
+                container.classList.remove('truncated');
+            }
+        });
+    }
+
+    function spawnRipple(evt, container){
+        const rect = container.getBoundingClientRect();
+        const r = document.createElement('div');
+        r.className = 'ripple';
+        const size = Math.max(rect.width, rect.height) * 0.9;
+        r.style.width = size+'px';
+        r.style.height = size+'px';
+        r.style.left = (evt.clientX - rect.left) + 'px';
+        r.style.top = (evt.clientY - rect.top) + 'px';
+        container.appendChild(r);
+        setTimeout(()=> r.remove(), 650);
+    }
+
+    function renderSpread(autoSpeak){
+        const story = getCurrentStory();
+        if(!story || story.pages.length === 0){
+            spreadEl.innerHTML = '';
+            const empty = document.createElement('div');
+            empty.className = 'page-panel empty';
+            empty.style.flex = '1';
+            const msg = document.createElement('div');
+            msg.className = 'empty-msg';
+            msg.textContent = '📖 点击「添加绘本页面」开始创建';
+            empty.appendChild(msg);
+            spreadEl.appendChild(empty);
+            spreadTag.textContent = '0 / 0';
+            storyCaption.textContent = story ? story.title : '请创建绘本';
+            prevBtn.disabled = true;
+            nextBtn.disabled = true;
+            return;
+        }
+
+        const total = totalSpreads(story);
+        if(currentSpread > total-1) currentSpread = total-1;
+        if(currentSpread < 0) currentSpread = 0;
+
+        const leftIdx = currentSpread*2;
+        const rightIdx = leftIdx+1;
+        const leftPage = story.pages[leftIdx] || null;
+        const rightPage = story.pages[rightIdx] || null;
+
+        spreadEl.innerHTML = '';
+        spreadEl.appendChild(buildPagePanel(leftPage, leftIdx));
+        spreadEl.appendChild(buildPagePanel(rightPage, rightIdx));
+
+        storyCaption.textContent = story.title;
+        const shownEnd = Math.min(rightIdx+1, story.pages.length);
+        spreadTag.textContent = story.pages.length
+            ? `${leftIdx+1}${rightIdx < story.pages.length ? '–'+shownEnd : ''} / ${story.pages.length}`
+            : '0 / 0';
+
+        prevBtn.disabled = currentSpread === 0;
+        nextBtn.disabled = currentSpread >= total-1;
+
+        if(autoSpeak){
+            const items = [];
+            const speakers = spreadEl.querySelectorAll('.mini-speaker');
+            if(leftPage && leftPage.text) items.push({ text:leftPage.text, indicatorEl:speakers[0] });
+            if(rightPage && rightPage.text) items.push({ text:rightPage.text, indicatorEl:speakers[1] });
+            speakSequence(items);
+        }
+    }
+
+    function renderAll(autoSpeak){
+        renderTree();
+        renderSpread(!!autoSpeak);
+        if(currentStoryId) localStorage.setItem('wib:currentStoryId', currentStoryId);
+    }
+
+    /* =====================================================================
+       Navigation
+       ===================================================================== */
+    prevBtn.addEventListener('click', ()=>{
+        if(currentSpread > 0){ currentSpread--; renderAll(true); }
+    });
+    nextBtn.addEventListener('click', ()=>{
+        const story = getCurrentStory();
+        if(!story) return;
+        const total = totalSpreads(story);
+        if(currentSpread < total-1){ currentSpread++; renderAll(true); }
+    });
+    document.addEventListener('keydown', (e)=>{
+        const t = e.target;
+        if(t && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.isContentEditable)) return;
+        if(e.key === 'ArrowLeft') prevBtn.click();
+        if(e.key === 'ArrowRight') nextBtn.click();
+    });
+
+    mobileMenuBtn.addEventListener('click', ()=> sidebar.classList.toggle('open'));
+    document.addEventListener('click', (e)=>{
+        if(window.innerWidth > 860) return;
+        if(sidebar.classList.contains('open') && !sidebar.contains(e.target) && e.target !== mobileMenuBtn){
+            sidebar.classList.remove('open');
+        }
+    });
+
+    /* =====================================================================
+       Folder modal
+       ===================================================================== */
+    const folderModalOverlay = document.getElementById('folderModalOverlay');
+    const folderNameInput = document.getElementById('folderNameInput');
+    const confirmFolderBtn = document.getElementById('confirmFolderBtn');
+    const cancelFolderBtn = document.getElementById('cancelFolderBtn');
+    const closeFolderModalBtn = document.getElementById('closeFolderModalBtn');
+    const folderDepthHint = document.getElementById('folderDepthHint');
+    let newFolderParentId = null;
+
+    function openNewFolderModal(parentId){
+        newFolderParentId = parentId;
+        const depth = parentId ? getNodeDepth(library, parentId) + 1 : 0;
+        folderDepthHint.textContent = `当前深度: ${depth} / 3`;
+        folderNameInput.value = '';
+        folderModalOverlay.classList.add('open');
+        setTimeout(()=> folderNameInput.focus(), 50);
+    }
+
+    function closeFolderModal(){
+        folderModalOverlay.classList.remove('open');
+        newFolderParentId = null;
+    }
+
+    confirmFolderBtn.addEventListener('click', ()=>{
+        const name = folderNameInput.value.trim();
+        if(!name){ folderNameInput.focus(); return; }
+        const parentId = newFolderParentId;
+        const parentNodes = parentId ? findNodeById(library, parentId)?.children : library;
+        if(!parentNodes){ alert('父文件夹不存在'); closeFolderModal(); return; }
+        if(hasDuplicateName(parentNodes, name)){ alert('名称已存在'); folderNameInput.focus(); return; }
+
+        const depth = parentId ? getNodeDepth(library, parentId) + 1 : 0;
+        if(depth > 3){ alert('最多支持3级文件夹'); return; }
+
+        const folder = createFolder(parentId, name);
+        if(folder){
+            closeFolderModal();
+            setSelectedFolder(folder.id);
+            renderAll(false);
+        }
+    });
+
+    cancelFolderBtn.addEventListener('click', closeFolderModal);
+    closeFolderModalBtn.addEventListener('click', closeFolderModal);
+    folderModalOverlay.addEventListener('click', (e)=>{ if(e.target === folderModalOverlay) closeFolderModal(); });
+    folderNameInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') confirmFolderBtn.click(); });
+
+    /* =====================================================================
+       Rename Folder modal
+       ===================================================================== */
+    const renameFolderModalOverlay = document.getElementById('renameFolderModalOverlay');
+    const renameFolderInput = document.getElementById('renameFolderInput');
+    const confirmRenameFolderBtn = document.getElementById('confirmRenameFolderBtn');
+    const cancelRenameFolderBtn = document.getElementById('cancelRenameFolderBtn');
+    const closeRenameFolderModalBtn = document.getElementById('closeRenameFolderModalBtn');
+    let renameFolderTargetId = null;
+
+    function openRenameFolderModal(folderId){
+        const folder = findNodeById(library, folderId);
+        if(!folder || folder.type !== 'folder') return;
+        renameFolderTargetId = folderId;
+        renameFolderInput.value = folder.name;
+        renameFolderModalOverlay.classList.add('open');
+        setTimeout(()=> renameFolderInput.focus(), 50);
+    }
+
+    function closeRenameFolderModal(){
+        renameFolderModalOverlay.classList.remove('open');
+        renameFolderTargetId = null;
+    }
+
+    confirmRenameFolderBtn.addEventListener('click', ()=>{
+        const name = renameFolderInput.value.trim();
+        if(!name){ renameFolderInput.focus(); return; }
+        if(renameFolderTargetId && renameFolder(renameFolderTargetId, name)){
+            closeRenameFolderModal();
+            renderAll(false);
+        }
+    });
+
+    cancelRenameFolderBtn.addEventListener('click', closeRenameFolderModal);
+    closeRenameFolderModalBtn.addEventListener('click', closeRenameFolderModal);
+    renameFolderModalOverlay.addEventListener('click', (e)=>{ if(e.target === renameFolderModalOverlay) closeRenameFolderModal(); });
+    renameFolderInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') confirmRenameFolderBtn.click(); });
+
+    /* =====================================================================
+       Story modal
+       ===================================================================== */
+    const storyModalOverlay = document.getElementById('storyModalOverlay');
+    const storyModalTitle = document.getElementById('storyModalTitle');
+    const storyNameInput = document.getElementById('storyNameInput');
+    const confirmStoryBtn = document.getElementById('confirmStoryBtn');
+    const cancelStoryBtn = document.getElementById('cancelStoryBtn');
+    const newStoryBtn = document.getElementById('newStoryBtn');
+    const closeStoryModalBtn = document.getElementById('closeStoryModalBtn');
+
+    let storyModalMode = 'create';
+    let storyModalTargetId = null;
+
+    function openStoryModal(mode, storyId){
+        storyModalMode = mode;
+        storyModalTargetId = storyId;
+        storyModalTitle.textContent = mode === 'create' ? '新增绘本' : '编辑绘本名称';
+        if(mode === 'rename' && storyId){
+            const story = findNodeById(library, storyId);
+            if(story) storyNameInput.value = story.title;
+        } else {
+            storyNameInput.value = '';
+        }
+        storyModalOverlay.classList.add('open');
+        setTimeout(()=> storyNameInput.focus(), 50);
+    }
+
+    function closeStoryModal(){ storyModalOverlay.classList.remove('open'); }
+
+    newStoryBtn.addEventListener('click', ()=>{
+        openStoryModal('create', null);
+    });
+
+    closeStoryModalBtn.addEventListener('click', closeStoryModal);
+    cancelStoryBtn.addEventListener('click', closeStoryModal);
+    storyModalOverlay.addEventListener('click', (e)=>{ if(e.target === storyModalOverlay) closeStoryModal(); });
+    storyNameInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') confirmStoryBtn.click(); });
+
+    confirmStoryBtn.addEventListener('click', ()=>{
+        const name = storyNameInput.value.trim();
+        if(!name){ storyNameInput.focus(); return; }
+        if(storyModalMode === 'create'){
+            const parentId = selectedFolderId;
+            const parentNodes = parentId ? findNodeById(library, parentId)?.children : library;
+            if(!parentNodes){ alert('目标文件夹不存在'); closeStoryModal(); return; }
+            if(hasDuplicateName(parentNodes, name)){ alert('该位置已存在同名内容'); storyNameInput.focus(); return; }
+
+            const maxSortKey = parentNodes.reduce((max, n) => {
+                const key = n.sortKey !== undefined ? n.sortKey : Infinity;
+                return key !== Infinity ? Math.max(max, key) : max;
+            }, 0);
+            const story = createStory(parentId, name, maxSortKey + 1);
+            if(story){
+                currentStoryId = story.id;
+                currentSpread = 0;
+                localStorage.setItem('wib:currentStoryId', currentStoryId);
+                saveLibrary();
+                renderAll(true);
+                closeStoryModal();
+                openAddModal();
+            }
+        } else if(storyModalMode === 'rename' && storyModalTargetId){
+            if(updateStoryTitle(storyModalTargetId, name)){
+                closeStoryModal();
+                renderAll(false);
+            }
+        }
+    });
+
+    /* =====================================================================
+       ===== OCR识别模块 - 修复乱码问题 =====
+       优化点:
+       1. 更精确的裁剪区域 (底部20-25%)
+       2. 多区域尝试识别，选择最佳结果
+       3. 智能过滤乱码文本
+       4. 文本质量评分
+       ===================================================================== */
+    const addModalOverlay = document.getElementById('addModalOverlay');
+    const addModalTitle = document.getElementById('addModalTitle');
+    const openAddModalBtn = document.getElementById('openAddModalBtn');
+    const closeAddModalBtn = document.getElementById('closeAddModalBtn');
+    const dropzone = document.getElementById('dropzone');
+    const fileInput = document.getElementById('fileInput');
+    const pendingWrap = document.getElementById('pendingWrap');
+    const pendingListEl = document.getElementById('pendingList');
+    const addAllBtn = document.getElementById('addAllBtn');
+    const clearAllBtn = document.getElementById('clearAllBtn');
+    const ocrStatusText = document.getElementById('ocrStatusText');
+    const dirHint = document.getElementById('dirHint');
+
+    const previewOverlay = document.getElementById('previewOverlay');
+    const previewImage = document.getElementById('previewImage');
+
+    let pendingItems = [];
+    let ocrWorker = null;
+    let pendingIdSeq = 0;
+
+    const BASE_COMMON_WORDS = [
+        'a','an','oh','ok','okay','the','of','to','for','with','on','at','from','by','in','into','through','during',
+        'including','without','against','between','among','upon','about','after','before','behind',
+        'below','beneath','beside','beyond','down','except','inside','like','near','off','onto','out',
+        'outside','over','past','since','throughout','toward','under','until','up','within','i','you',
+        'he','she','it','we','they','me','him','her','us','them','my','your','his','our','their','mine',
+        'yours','hers','ours','theirs','this','that','these','those','who','which','what','where','when',
+        'why','how','be','am','is','are','was','were','being','been','have','has','had','do','does','did',
+        'doing','will','would','shall','should','may','might','must','can','could','yes','no','not','so',
+        'very','too','also','only','just','but','or','and','nor','yet','as','than','then','now','there',
+        'here','some','any','more','most','other','such','own','same','well','good','great','little','big',
+        'small','old','new','young','long','short','high','low','wide','deep','near','far','right','left',
+        'all','every','each','both','neither','either','few','many','much','several','one','two','three',
+        'four','five','six','seven','eight','nine','ten','first','second','third','fourth','fifth','sixth',
+        'seventh','eighth','ninth','tenth','last','next','example','because','since','although','though',
+        'whereas','while','then','therefore','thus','hence','accordingly','consequently','according',
+        'across','along','among','around','behind','beneath','beside','between','beyond','during','except',
+        'plus','minus','times','per','via','versus','vs','et','al','etc','spaceman','dad','biff','chip',
+        'kipper','floppy','mum','gran','grandma','grandpa','teddy','bear','dog','cat','pig','fox','ox',
+        'hen','pen','red','green','blue','yellow','pink','black','white','brown','purple','orange','grey',
+        "i'm","you're","he's","she's","it's","we're","they're","i'll","you'll","he'll","she'll",
+        "it'll","we'll","they'll","i've","you've","we've","they've","i'd","you'd","he'd","she'd",
+        "it'd","we'd","they'd","don't","doesn't","didn't","can't","couldn't","wouldn't","shouldn't",
+        "mightn't","mustn't","shan't","won't","isn't","aren't","wasn't","weren't","haven't","hasn't",
+        "hadn't","let's","ma'am","o'clock","'em"
+    ];
+
+    function getCommonWords() {
+        const words = new Set(BASE_COMMON_WORDS);
+        whitelist.forEach(w => words.add(w.toLowerCase()));
+        return words;
+    }
+
+    // ===== 增强的文本质量评分 =====
+    function scoreTextQuality(text) {
+        if (!text || text.length < 2) return 0;
+        
+        const chars = text.split('');
+        let alphaCount = 0;
+        let spaceCount = 0;
+        let punctuationCount = 0;
+        let validWordCount = 0;
+        let totalWordLength = 0;
+        
+        const words = text.split(/\s+/);
+        const commonWords = getCommonWords();
+        
+        for (const ch of chars) {
+            if (/[a-zA-Z]/.test(ch)) alphaCount++;
+            else if (ch === ' ') spaceCount++;
+            else if (/[.,!?;:'"\-]/.test(ch)) punctuationCount++;
+        }
+        
+        for (const w of words) {
+            const clean = w.replace(/[^a-zA-Z']/g, '');
+            if (clean.length > 0) {
+                totalWordLength += clean.length;
+                if (commonWords.has(clean.toLowerCase()) || isInWhitelist(clean) || clean.length >= 3) {
+                    validWordCount++;
+                }
+            }
+        }
+        
+        const totalChars = chars.length;
+        const alphaRatio = totalChars > 0 ? alphaCount / totalChars : 0;
+        const validWordRatio = words.length > 0 ? validWordCount / words.length : 0;
+        const avgWordLength = words.length > 0 ? totalWordLength / words.length : 0;
+        
+        let score = 0;
+        if (alphaRatio > 0.6) score += 30;
+        else if (alphaRatio > 0.4) score += 15;
+        else score -= 20;
+        
+        if (validWordRatio > 0.5) score += 30;
+        else if (validWordRatio > 0.3) score += 15;
+        else score -= 15;
+        
+        if (avgWordLength >= 2 && avgWordLength <= 10) score += 20;
+        else if (avgWordLength > 0) score -= 10;
+        
+        const hasCommonWord = words.some(w => {
+            const clean = w.replace(/[^a-zA-Z']/g, '');
+            return clean.length > 0 && (commonWords.has(clean.toLowerCase()) || isInWhitelist(clean));
+        });
+        if (hasCommonWord) score += 20;
+        
+        const nonAlphaRatio = 1 - alphaRatio;
+        if (nonAlphaRatio > 0.5) score -= 30;
+        
+        return score;
+    }
+
+    // ===== 增强的文本清洗 - 智能过滤乱码 =====
+    function cleanOcrTextEnhanced(raw) {
+        if (!raw) return '';
+        
+        const lines = raw.split('\n').filter(s => s.trim().length > 0);
+        if (lines.length === 0) return '';
+        
+        let bestLine = '';
+        let bestScore = -999;
+        const commonWords = getCommonWords();
+        
+        for (const line of lines) {
+            let trimmed = line.trim();
+            if (trimmed.length < 2) continue;
+            
+            const chars = trimmed.split('');
+            let alphaCount = 0;
+            let nonAlphaCount = 0;
+            for (const ch of chars) {
+                if (/[a-zA-Z]/.test(ch)) alphaCount++;
+                else if (ch !== ' ' && ch !== '.' && ch !== ',' && ch !== '!' && ch !== '?' && ch !== "'" && ch !== '-') {
+                    nonAlphaCount++;
+                }
+            }
+            
+            const totalValid = alphaCount + nonAlphaCount;
+            if (totalValid > 0 && nonAlphaCount / totalValid > 0.4) continue;
+            
+            const words = trimmed.split(/\s+/);
+            let meaningfulWords = 0;
+            let totalWords = 0;
+            for (const w of words) {
+                const clean = w.replace(/[^a-zA-Z']/g, '');
+                if (clean.length > 0) {
+                    totalWords++;
+                    if (commonWords.has(clean.toLowerCase()) || isInWhitelist(clean) || clean.length >= 3) {
+                        meaningfulWords++;
+                    }
+                }
+            }
+            
+            if (totalWords > 0 && meaningfulWords / totalWords < 0.3) continue;
+            
+            const score = scoreTextQuality(trimmed);
+            if (score > bestScore) {
+                bestScore = score;
+                bestLine = trimmed;
+            }
+        }
+        
+        if (!bestLine && lines.length > 0) {
+            const combined = lines.join(' ').trim();
+            const score = scoreTextQuality(combined);
+            if (score > 0) {
+                bestLine = combined;
+            }
+        }
+        
+        if (!bestLine) return '';
+        
+        let result = bestLine.replace(/\s+/g, ' ').trim();
+        if (result.length > 500) result = result.slice(0, 500);
+        
+        return result;
+    }
+
+    function isGrayscaleImage(imageData) {
+        const data = imageData.data;
+        const len = data.length;
+        let colorCount = 0;
+        const sampleStep = Math.max(1, Math.floor(len / 6000));
+        for (let i = 0; i < len && colorCount < 20; i += sampleStep * 4) {
+            const r = data[i], g = data[i+1], b = data[i+2];
+            if (Math.abs(r - g) + Math.abs(g - b) + Math.abs(b - r) > 20) colorCount++;
+        }
+        return colorCount < 12;
+    }
+
+    function loadImageEl(src){
+        return new Promise((resolve, reject)=>{
+            const img = new Image();
+            img.onload = ()=> resolve(img);
+            img.onerror = reject;
+            img.src = src;
+        });
+    }
+
+    function getImageData(img) {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth || img.width;
+        canvas.height = img.naturalHeight || img.height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        return ctx.getImageData(0, 0, canvas.width, canvas.height);
+    }
+
+    async function getOcrWorker() {
+        if (ocrWorker) return ocrWorker;
+        ocrStatusText.textContent = '正在准备文字识别引擎（首次使用需下载英文语言包，请稍候）…';
+        ocrWorker = await Tesseract.createWorker('eng');
+        await ocrWorker.setParameters({
+            tessedit_pageseg_mode: '6',
+            tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,'!?-" + '"',
+            tessedit_ocr_engine_mode: '2'
+        });
+        return ocrWorker;
+    }
+
+    // ===== 优化的图像裁剪 - 多区域尝试 =====
+    async function cropRegionOptimized(dataUrl, bottomFrac = 0.22, topOffset = 0.03) {
+        const img = await loadImageEl(dataUrl);
+        const cropTop = Math.max(0, Math.floor(img.naturalHeight * (1 - bottomFrac - topOffset)));
+        const cropHeight = Math.max(1, Math.floor(img.naturalHeight * (bottomFrac + topOffset)));
+        
+        const scale = Math.min(2.5, 1600 / img.naturalWidth);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(200, Math.floor(img.naturalWidth * scale));
+        canvas.height = Math.max(50, Math.floor(cropHeight * scale));
+        
+        const ctx = canvas.getContext('2d');
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, 0, cropTop, img.naturalWidth, cropHeight, 0, 0, canvas.width, canvas.height);
+        
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+        for (let i = 0; i < data.length; i += 4) {
+            const avg = (data[i] + data[i+1] + data[i+2]) / 3;
+            const enhanced = avg < 128 ? Math.max(0, avg - 20) : Math.min(255, avg + 20);
+            data[i] = enhanced;
+            data[i+1] = enhanced;
+            data[i+2] = enhanced;
+        }
+        ctx.putImageData(imageData, 0, 0);
+        
+        return canvas.toDataURL('image/jpeg', 0.9);
+    }
+
+    // ===== 优化的单图识别 =====
+    async function recognizeSingleImage(dataUrl, worker) {
+        const regions = [
+            { bottom: 0.25, top: 0.02 },
+            { bottom: 0.20, top: 0.05 },
+            { bottom: 0.30, top: 0.02 }
+        ];
+        
+        let bestText = '';
+        let bestScore = -999;
+        
+        for (const region of regions) {
+            try {
+                const cropUrl = await cropRegionOptimized(dataUrl, region.bottom, region.top);
+                const { data } = await worker.recognize(cropUrl);
+                const rawText = data && data.text ? data.text : '';
+                const cleaned = cleanOcrTextEnhanced(rawText);
+                if (cleaned) {
+                    const score = scoreTextQuality(cleaned);
+                    if (score > bestScore) {
+                        bestScore = score;
+                        bestText = cleaned;
+                    }
+                }
+            } catch(e) {
+            }
+        }
+        
+        return bestText;
+    }
+
+    async function recognizeItemsOptimized(items, concurrency = 4) {
+        const worker = await getOcrWorker();
+        const results = new Array(items.length);
+        let index = 0;
+        
+        async function processNext() {
+            while (index < items.length) {
+                const i = index++;
+                try {
+                    const text = await recognizeSingleImage(items[i].dataUrl, worker);
+                    results[i] = text || '';
+                } catch (e) {
+                    results[i] = '';
+                }
+            }
+        }
+        
+        const concurrencyCount = Math.min(concurrency, items.length);
+        const workers = [];
+        for (let i = 0; i < concurrencyCount; i++) {
+            workers.push(processNext());
+        }
+        await Promise.all(workers);
+        return results;
+    }
+
+    async function handleFiles(fileList) {
+        const files = Array.from(fileList).filter(f => f.type.startsWith('image/'));
+        if (!files.length) return;
+        files.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+
+        const itemsToProcess = [];
+
+        for (const file of files) {
+            const dataUrl = await new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = (e) => resolve(e.target.result);
+                reader.readAsDataURL(file);
+            });
+
+            const img = await loadImageEl(dataUrl);
+            const imageData = await getImageData(img);
+            const isGray = isGrayscaleImage(imageData);
+
+            const item = {
+                id: 'p' + (pendingIdSeq++),
+                name: file.name,
+                dataUrl: dataUrl,
+                text: '',
+                status: isGray ? 'done' : 'recognizing'
+            };
+            pendingItems.push(item);
+            if (!isGray) {
+                itemsToProcess.push(item);
+            }
+        }
+
+        renderPending();
+
+        if (itemsToProcess.length > 0) {
+            ocrStatusText.textContent = `正在识别 ${itemsToProcess.length} 张图片...`;
+            try {
+                const results = await recognizeItemsOptimized(itemsToProcess, 4);
+                itemsToProcess.forEach((item, idx) => {
+                    const text = results[idx] || '';
+                    const finalText = cleanOcrTextEnhanced(text);
+                    item.text = finalText;
+                    item.status = finalText ? 'done' : 'error';
+                });
+                ocrStatusText.textContent = '✅ 识别完成，已智能过滤乱码。点击图片可预览大图。';
+            } catch (err) {
+                console.error('识别错误:', err);
+                ocrStatusText.textContent = '⚠️ 识别过程中出现错误，请重试。';
+                itemsToProcess.forEach(item => { item.status = 'error'; });
+            }
+        } else {
+            ocrStatusText.textContent = '所有图片均为灰度图，已自动跳过识别。';
+        }
+
+        pendingItems.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+        renderPending();
+    }
+
+    function renderPending() {
+        pendingWrap.style.display = pendingItems.length ? 'block' : 'none';
+        pendingListEl.innerHTML = '';
+        pendingItems.forEach(item => {
+            const row = document.createElement('div');
+            row.className = 'pending-item';
+
+            const img = document.createElement('img');
+            img.src = item.dataUrl;
+            img.alt = item.name;
+            img.addEventListener('click', (e) => {
+                e.stopPropagation();
+                previewImage.src = item.dataUrl;
+                previewOverlay.classList.add('open');
+            });
+            row.addEventListener('click', (e) => {
+                if (e.target.tagName !== 'BUTTON' && e.target.tagName !== 'TEXTAREA' && !e.target.closest('.pi-remove') && !e.target.closest('textarea')) {
+                    previewImage.src = item.dataUrl;
+                    previewOverlay.classList.add('open');
+                }
+            });
+            row.appendChild(img);
+
+            const body = document.createElement('div');
+            body.className = 'pi-body';
+
+            const status = document.createElement('div');
+            status.className = 'pi-status ' + item.status;
+            status.innerHTML =
+                item.status === 'recognizing' ? '<span class="spin">⏳</span> 识别中…' :
+                    item.status === 'done' ? '✅ 已识别' :
+                        '⚠️ 未识别到有效文字，请手动输入';
+            body.appendChild(status);
+
+            const ta = document.createElement('textarea');
+            ta.rows = 2;
+            ta.placeholder = '这一页要朗读的英文文字…';
+            ta.value = item.text;
+            ta.addEventListener('input', () => { item.text = ta.value; });
+            ta.addEventListener('click', (e) => e.stopPropagation());
+            body.appendChild(ta);
+
+            row.appendChild(body);
+
+            const rm = document.createElement('button');
+            rm.className = 'pi-remove';
+            rm.textContent = '✕';
+            rm.title = '移除';
+            rm.addEventListener('click', (e) => {
+                e.stopPropagation();
+                pendingItems = pendingItems.filter(p => p.id !== item.id);
+                renderPending();
+            });
+            row.appendChild(rm);
+
+            pendingListEl.appendChild(row);
+        });
+        addAllBtn.disabled = pendingItems.length === 0;
+    }
+
+    function openAddModal() {
+        const story = getCurrentStory();
+        if (!story) {
+            alert('请先创建一个绘本，然后再添加页面。');
+            return;
+        }
+        addModalTitle.textContent = `添加绘本页面 · 《${story.title}》`;
+        dirHint.textContent = '📁 当前图片目录：' + imgDir + '（新页面按文件名引用该目录下的图片，可在右上角「📁 图片目录」修改）';
+        addModalOverlay.classList.add('open');
+    }
+
+    function closeAddModal() { addModalOverlay.classList.remove('open'); }
+
+    openAddModalBtn.addEventListener('click', openAddModal);
+    closeAddModalBtn.addEventListener('click', closeAddModal);
+    addModalOverlay.addEventListener('click', (e) => { if (e.target === addModalOverlay) closeAddModal(); });
+
+    previewOverlay.addEventListener('click', () => {
+        previewOverlay.classList.remove('open');
+        previewImage.src = '';
+    });
+
+    dropzone.addEventListener('click', () => fileInput.click());
+    dropzone.addEventListener('dragover', (e) => { e.preventDefault();
+        dropzone.classList.add('drag'); });
+    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
+    dropzone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropzone.classList.remove('drag');
+        if (e.dataTransfer.files && e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
+    });
+    fileInput.addEventListener('change', (e) => {
+        if (e.target.files && e.target.files.length) handleFiles(e.target.files);
+        fileInput.value = '';
+    });
+
+    function fileNameCompare(a, b) {
+        return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+    }
+
+    addAllBtn.addEventListener('click', () => {
+        if (!pendingItems.length) return;
+        const story = getCurrentStory();
+        if (!story) { alert('请选择绘本'); return; }
+        const insertAt = story.pages.length;
+        pendingItems.sort((a, b) => fileNameCompare(a.name, b.name));
+        pendingItems.forEach(item => {
+            sessionSrcCache[item.name] = item.dataUrl;
+            story.pages.push({ file: item.name, text: item.text.trim() });
+        });
+        currentSpread = Math.floor(insertAt / 2);
+        pendingItems = [];
+        renderPending();
+        saveLibrary();
+        ocrStatusText.textContent = '✅ 已加入绘本，已智能过滤无意义随机字母组合。';
+        closeAddModal();
+        renderAll(true);
+    });
+
+    clearAllBtn.addEventListener('click', () => { pendingItems = [];
+        renderPending(); });
+
+    /* =====================================================================
+       ===== 批量导入模块（使用优化的OCR） =====
+       ===================================================================== */
+    const batchImportBtn = document.getElementById('batchImportBtn');
+    const batchPreviewOverlay = document.getElementById('batchPreviewOverlay');
+    const closeBatchPreviewBtn = document.getElementById('closeBatchPreviewBtn');
+    const cancelBatchPreviewBtn = document.getElementById('cancelBatchPreviewBtn');
+    const confirmBatchBtn = document.getElementById('confirmBatchBtn');
+    const batchStoryList = document.getElementById('batchStoryList');
+    const batchPreviewCount = document.getElementById('batchPreviewCount');
+    const batchPreviewHint = document.getElementById('batchPreviewHint');
+
+    const batchProgressOverlay = document.getElementById('batchProgressOverlay');
+    const batchProgressBox = document.getElementById('batchProgressBox');
+    const batchProgressHeader = document.getElementById('batchProgressHeader');
+    const batchProgressTitle = document.getElementById('batchProgressTitle');
+    const closeBatchProgressBtn = document.getElementById('closeBatchProgressBtn');
+    const cancelBatchBtn = document.getElementById('cancelBatchBtn');
+    const batchProgressActions = document.getElementById('batchProgressActions');
+    const progressFill = document.getElementById('progressFill');
+    const totalStoriesEl = document.getElementById('totalStories');
+    const totalImagesEl = document.getElementById('totalImages');
+    const processedCountEl = document.getElementById('processedCount');
+    const progressLog = document.getElementById('progressLog');
+
+    let batchCancelFlag = false;
+    let batchRunning = false;
+    let batchGroups = [];
+    let importCompleted = false;
+    let importedFolderId = null;
+
+    function renderBatchPreview(groups) {
+        batchStoryList.innerHTML = '';
+        groups.forEach((group, idx) => {
+            const item = document.createElement('div');
+            item.className = 'batch-story-item';
+            item.dataset.idx = idx;
+
+            const nameSpan = document.createElement('span');
+            nameSpan.className = 'b-name';
+            nameSpan.textContent = group.displayName;
+
+            const pagesSpan = document.createElement('span');
+            pagesSpan.className = 'b-pages';
+            pagesSpan.textContent = `${group.pages.length} 页`;
+
+            const statusSpan = document.createElement('span');
+            statusSpan.className = 'b-status pending';
+            statusSpan.textContent = '待导入';
+
+            item.appendChild(nameSpan);
+            item.appendChild(pagesSpan);
+            item.appendChild(statusSpan);
+            batchStoryList.appendChild(item);
+        });
+
+        batchPreviewCount.textContent = groups.length;
+        batchPreviewHint.textContent = groups.length > 0 ?
+            `请确认以上 ${groups.length} 个绘本信息无误后，点击「确认导入」开始导入。` :
+            '未识别到任何绘本，请检查文件名格式（如 "01绘本名-01.jpg" 或 "绘本名 1.jpg"）';
+        confirmBatchBtn.disabled = groups.length === 0;
+    }
+
+    function showBatchPreview(groups) {
+        batchGroups = groups;
+        renderBatchPreview(groups);
+        batchPreviewOverlay.classList.add('open');
+    }
+
+    function closeBatchPreview() {
+        batchPreviewOverlay.classList.remove('open');
+        batchGroups = [];
+    }
+
+    function setImportComplete() {
+        importCompleted = true;
+        batchProgressTitle.textContent = '✅ 导入完成！';
+        batchProgressHeader.style.background = 'var(--leaf)';
+        progressFill.classList.add('complete');
+        batchProgressActions.innerHTML = '';
+        const closeBtn = document.createElement('button');
+        closeBtn.className = 'btn success';
+        closeBtn.textContent = '关闭';
+        closeBtn.addEventListener('click', () => {
+            batchProgressOverlay.classList.remove('open');
+            resetImportState();
+        });
+        batchProgressActions.appendChild(closeBtn);
+        closeBatchProgressBtn.style.display = 'block';
+        closeBatchProgressBtn.onclick = () => {
+            batchProgressOverlay.classList.remove('open');
+            resetImportState();
+        };
+    }
+
+    function resetImportState() {
+        importCompleted = false;
+        batchRunning = false;
+        batchCancelFlag = false;
+        progressFill.classList.remove('complete');
+        batchProgressTitle.textContent = '📦 批量导入中...';
+        batchProgressHeader.style.background = '';
+        batchProgressActions.innerHTML = '';
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'btn danger';
+        cancelBtn.id = 'cancelBatchBtn';
+        cancelBtn.textContent = '取消导入';
+        cancelBtn.addEventListener('click', () => {
+            if (batchRunning) {
+                batchCancelFlag = true;
+                cancelBtn.disabled = true;
+                cancelBtn.textContent = '正在取消...';
+                logProgress('⏹️ 正在取消导入...');
+                setTimeout(() => {
+                    cancelBtn.disabled = false;
+                    cancelBtn.textContent = '取消导入';
+                }, 3000);
+            } else {
+                batchProgressOverlay.classList.remove('open');
+                resetImportState();
+            }
+        });
+        batchProgressActions.appendChild(cancelBtn);
+        closeBatchProgressBtn.style.display = 'block';
+        closeBatchProgressBtn.onclick = () => {
+            if (!batchRunning) {
+                batchProgressOverlay.classList.remove('open');
+                resetImportState();
+            } else {
+                alert('导入正在进行中，请等待完成或点击「取消导入」');
+            }
+        };
+    }
+
+    // 批量识别使用优化的单图识别
+    async function batchRecognizeOptimized(pageItems, concurrency = 6) {
+        const worker = await getOcrWorker();
+        const results = new Array(pageItems.length);
+        let index = 0;
+        
+        async function processNext() {
+            while (index < pageItems.length) {
+                const i = index++;
+                try {
+                    const text = await recognizeSingleImage(pageItems[i].dataUrl, worker);
+                    results[i] = text || '';
+                } catch (e) {
+                    results[i] = '';
+                }
+            }
+        }
+        
+        const concurrencyCount = Math.min(concurrency, pageItems.length);
+        const workers = [];
+        for (let i = 0; i < concurrencyCount; i++) {
+            workers.push(processNext());
+        }
+        await Promise.all(workers);
+        return results;
+    }
+
+    async function executeBatchImport(groups) {
+        if (batchRunning) return;
+        batchRunning = true;
+        batchCancelFlag = false;
+        importCompleted = false;
+        importedFolderId = null;
+
+        progressFill.style.width = '0%';
+        progressFill.classList.remove('complete');
+        progressLog.innerHTML = '';
+        const totalImages = groups.reduce((sum, g) => sum + g.pages.length, 0);
+        totalStoriesEl.textContent = groups.length;
+        totalImagesEl.textContent = totalImages;
+        processedCountEl.textContent = '0';
+        batchProgressOverlay.classList.add('open');
+        closeBatchProgressBtn.style.display = 'block';
+        closeBatchProgressBtn.onclick = () => {
+            if (!batchRunning) {
+                batchProgressOverlay.classList.remove('open');
+                resetImportState();
+            } else {
+                alert('导入正在进行中，请等待完成或点击「取消导入」');
+            }
+        };
+
+        const statusElements = batchStoryList.querySelectorAll('.b-status');
+
+        try {
+            await getOcrWorker();
+
+            let processed = 0;
+            let successCount = 0;
+
+            const targetFolderId = selectedFolderId;
+            const targetParent = targetFolderId ? findNodeById(library, targetFolderId) : null;
+            const parentNodes = targetParent ? targetParent.children : library;
+
+            importedFolderId = targetFolderId;
+            const importedStoryIds = [];
+
+            for (let gIdx = 0; gIdx < groups.length; gIdx++) {
+                if (batchCancelFlag) {
+                    logProgress('⏹️ 导入已取消');
+                    break;
+                }
+
+                const group = groups[gIdx];
+                if (statusElements[gIdx]) {
+                    statusElements[gIdx].className = 'b-status importing';
+                    statusElements[gIdx].textContent = '导入中...';
+                }
+
+                logProgress(`📖 正在导入绘本: "${group.displayName}" (${group.pages.length} 页)`);
+
+                if (hasDuplicateName(parentNodes, group.displayName)) {
+                    logProgress(`⚠️ 绘本 "${group.displayName}" 已存在于目标位置，跳过`);
+                    if (statusElements[gIdx]) {
+                        statusElements[gIdx].className = 'b-status failed';
+                        statusElements[gIdx].textContent = '❌ 已存在';
+                    }
+                    processed += group.pages.length;
+                    const pct = totalImages > 0 ? Math.round((processed / totalImages) * 100) : 0;
+                    progressFill.style.width = Math.min(pct, 100) + '%';
+                    processedCountEl.textContent = processed;
+                    continue;
+                }
+
+                const nid = genId();
+                const cleanName = group.name;
+                const newStory = {
+                    id: nid,
+                    type: 'story',
+                    title: cleanName,
+                    builtin: false,
+                    pages: [],
+                    sortKey: group.sortKey
+                };
+
+                const pageItems = [];
+                for (let pIdx = 0; pIdx < group.pages.length; pIdx++) {
+                    if (batchCancelFlag) break;
+                    const { file } = group.pages[pIdx];
+                    try {
+                        const dataUrl = await new Promise((resolve) => {
+                            const reader = new FileReader();
+                            reader.onload = (e) => resolve(e.target.result);
+                            reader.readAsDataURL(file);
+                        });
+                        const img = await loadImageEl(dataUrl);
+                        const imageData = await getImageData(img);
+                        const isGray = isGrayscaleImage(imageData);
+                        pageItems.push({
+                            file: file,
+                            dataUrl: dataUrl,
+                            isGray: isGray,
+                            pageIdx: pIdx
+                        });
+                    } catch (err) {
+                        logProgress(`  ⚠️ 读取失败: ${file.name} - ${err.message}`);
+                        newStory.pages.push({ file: file.name, text: '' });
+                        processed++;
+                        const pct = totalImages > 0 ? Math.round((processed / totalImages) * 100) : 0;
+                        progressFill.style.width = Math.min(pct, 100) + '%';
+                        processedCountEl.textContent = processed;
+                    }
+                }
+
+                const toRecognize = pageItems.filter(item => !item.isGray);
+                let recognizedTexts = [];
+                if (toRecognize.length > 0 && !batchCancelFlag) {
+                    try {
+                        recognizedTexts = await batchRecognizeOptimized(toRecognize, 6);
+                    } catch (e) {
+                        logProgress(`  ⚠️ 识别出错: ${e.message}`);
+                        recognizedTexts = toRecognize.map(() => '');
+                    }
+                }
+
+                let recogIdx = 0;
+                for (let pIdx = 0; pIdx < pageItems.length; pIdx++) {
+                    if (batchCancelFlag) break;
+                    const item = pageItems[pIdx];
+                    let text = '';
+                    if (item.isGray) {
+                        text = '';
+                    } else {
+                        text = recognizedTexts[recogIdx] || '';
+                        recogIdx++;
+                    }
+                    sessionSrcCache[item.file.name] = item.dataUrl;
+                    newStory.pages.push({
+                        file: item.file.name,
+                        text: text
+                    });
+                    processed++;
+                    const logText = text ? '→ "' + text.substring(0, 30) + (text.length > 30 ? '...' : '') + '"' : '(无文字)';
+                    logProgress(`  ✅ 第 ${pIdx+1} 页: ${item.file.name} ${logText}`);
+                    const pct = totalImages > 0 ? Math.round((processed / totalImages) * 100) : 0;
+                    progressFill.style.width = Math.min(pct, 100) + '%';
+                    processedCountEl.textContent = processed;
+                }
+
+                if (newStory.pages.length > 0 && !batchCancelFlag) {
+                    parentNodes.push(newStory);
+                    sortNodes(parentNodes);
+                    successCount++;
+                    importedStoryIds.push(nid);
+
+                    if (statusElements[gIdx]) {
+                        statusElements[gIdx].className = 'b-status success';
+                        statusElements[gIdx].textContent = '✅ 导入成功';
+                    }
+
+                    logProgress(`✅ 绘本 "${group.displayName}" 导入成功 (${newStory.pages.length} 页)`);
+                } else if (batchCancelFlag) {
+                    break;
+                } else {
+                    if (statusElements[gIdx]) {
+                        statusElements[gIdx].className = 'b-status failed';
+                        statusElements[gIdx].textContent = '❌ 失败';
+                    }
+                    logProgress(`⚠️ 绘本 "${group.displayName}" 没有有效页面，已跳过`);
+                }
+
+                const pct = totalImages > 0 ? Math.round((processed / totalImages) * 100) : 0;
+                progressFill.style.width = Math.min(pct, 100) + '%';
+                processedCountEl.textContent = processed;
+            }
+
+            saveLibrary();
+
+            if (!batchCancelFlag && successCount > 0) {
+                if (importedFolderId) {
+                    collapsedNodes.delete(importedFolderId);
+                }
+                importedStoryIds.forEach(id => {
+                    collapsedNodes.add(id);
+                });
+                saveLibrary();
+            }
+
+            if (!batchCancelFlag) {
+                const allStories = getAllStories(library);
+                if (allStories.length > 0) {
+                    currentStoryId = allStories[allStories.length - 1].id;
+                    localStorage.setItem('wib:currentStoryId', currentStoryId);
+                    currentSpread = 0;
+                }
+                renderAll(true);
+                logProgress(`🎉 批量导入完成！成功导入 ${successCount} 个绘本`);
+                setImportComplete();
+            } else {
+                logProgress('⏹️ 导入已取消，部分绘本可能已导入');
+                saveLibrary();
+                renderAll(false);
+                batchProgressTitle.textContent = '⏹️ 导入已取消';
+                batchProgressHeader.style.background = 'var(--danger)';
+                batchProgressActions.innerHTML = '';
+                const closeBtn = document.createElement('button');
+                closeBtn.className = 'btn success';
+                closeBtn.textContent = '关闭';
+                closeBtn.addEventListener('click', () => {
+                    batchProgressOverlay.classList.remove('open');
+                    resetImportState();
+                });
+                batchProgressActions.appendChild(closeBtn);
+                closeBatchProgressBtn.style.display = 'block';
+                closeBatchProgressBtn.onclick = () => {
+                    batchProgressOverlay.classList.remove('open');
+                    resetImportState();
+                };
+            }
+
+            if (batchPreviewOverlay.classList.contains('open')) {
+                closeBatchPreview();
+            }
+
+        } catch (err) {
+            logProgress(`❌ 导入出错: ${err.message}`);
+            console.error(err);
+            batchProgressTitle.textContent = '❌ 导入出错';
+            batchProgressHeader.style.background = 'var(--danger)';
+            batchProgressActions.innerHTML = '';
+            const closeBtn = document.createElement('button');
+            closeBtn.className = 'btn success';
+            closeBtn.textContent = '关闭';
+            closeBtn.addEventListener('click', () => {
+                batchProgressOverlay.classList.remove('open');
+                resetImportState();
+            });
+            batchProgressActions.appendChild(closeBtn);
+            closeBatchProgressBtn.style.display = 'block';
+            closeBatchProgressBtn.onclick = () => {
+                batchProgressOverlay.classList.remove('open');
+                resetImportState();
+            };
+        } finally {
+            batchRunning = false;
+            const statusEls = batchStoryList.querySelectorAll('.b-status');
+            statusEls.forEach(el => {
+                if (el.textContent === '导入中...') {
+                    el.className = 'b-status failed';
+                    el.textContent = '❌ 失败';
+                }
+            });
+        }
+    }
+
+    batchImportBtn.addEventListener('click', () => {
+        if (batchRunning) {
+            alert('批量导入正在进行中，请等待完成');
+            return;
+        }
+
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.multiple = true;
+        input.accept = 'image/*';
+        input.style.display = 'none';
+        document.body.appendChild(input);
+
+        input.addEventListener('change', (e) => {
+            if (e.target.files && e.target.files.length > 0) {
+                const groups = analyzeFiles(e.target.files);
+                if (groups && groups.length > 0) {
+                    showBatchPreview(groups);
+                } else {
+                    alert('未能识别出任何绘本，请确保文件名格式正确（如 "01绘本名-01.jpg" 或 "绘本名 1.jpg"）');
+                }
+            }
+            input.remove();
+        });
+        input.click();
+    });
+
+    confirmBatchBtn.addEventListener('click', () => {
+        if (batchGroups.length === 0) return;
+        batchPreviewOverlay.classList.remove('open');
+        executeBatchImport(batchGroups);
+    });
+
+    cancelBatchPreviewBtn.addEventListener('click', closeBatchPreview);
+    closeBatchPreviewBtn.addEventListener('click', closeBatchPreview);
+    batchPreviewOverlay.addEventListener('click', (e) => {
+        if (e.target === batchPreviewOverlay) closeBatchPreview();
+    });
+
+    batchProgressOverlay.addEventListener('click', (e) => {
+        if (e.target === batchProgressOverlay && !batchRunning && importCompleted) {
+            batchProgressOverlay.classList.remove('open');
+            resetImportState();
+        } else if (e.target === batchProgressOverlay && !batchRunning) {
+            batchProgressOverlay.classList.remove('open');
+            resetImportState();
+        }
+    });
+
+    function logProgress(msg) {
+        const div = document.createElement('div');
+        div.textContent = msg;
+        progressLog.appendChild(div);
+        progressLog.scrollTop = progressLog.scrollHeight;
+    }
+
+    /* =====================================================================
+       Image directory setting modal
+       ===================================================================== */
+    const dirModalOverlay = document.getElementById('dirModalOverlay');
+    const dirInput = document.getElementById('dirInput');
+    const dirPickBtn = document.getElementById('dirPickBtn');
+    const confirmDirBtn = document.getElementById('confirmDirBtn');
+    const cancelDirBtn = document.getElementById('cancelDirBtn');
+    const closeDirModalBtn = document.getElementById('closeDirModalBtn');
+    const dirSettingBtn = document.getElementById('dirSettingBtn');
+
+    function openDirModal() {
+        dirInput.value = imgDir;
+        dirModalOverlay.classList.add('open');
+        setTimeout(() => dirInput.focus(), 50);
+    }
+
+    function closeDirModal() { dirModalOverlay.classList.remove('open'); }
+
+    function pickFolder() {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.webkitdirectory = true;
+        input.multiple = true;
+        input.style.display = 'none';
+        document.body.appendChild(input);
+
+        input.addEventListener('change', (e) => {
+            const files = e.target.files;
+            if (files && files.length > 0) {
+                let dirPath = '';
+                if (files[0].path) {
+                    const parts = files[0].path.split(/[\/\\]/);
+                    parts.pop();
+                    dirPath = parts.join('/');
+                    dirPath = dirPath.replace(/\\/g, '/');
+                }
+                if (dirPath) {
+                    if (!dirPath.endsWith('/')) dirPath += '/';
+                    dirInput.value = dirPath;
+                    imgDir = dirPath;
+                    localStorage.setItem(LS_DIR_KEY, imgDir);
+                    saveLibrary();
+                    closeDirModal();
+                    renderAll(false);
+                    alert('✅ 图片目录已更新为：' + dirPath + '\n绘本页面将重新加载。');
+                } else {
+                    alert('无法自动提取目录路径（浏览器安全限制），请手动输入完整路径。');
+                }
+            }
+            input.remove();
+        });
+        input.click();
+    }
+
+    dirPickBtn.addEventListener('click', pickFolder);
+    dirSettingBtn.addEventListener('click', openDirModal);
+    closeDirModalBtn.addEventListener('click', closeDirModal);
+    cancelDirBtn.addEventListener('click', closeDirModal);
+    dirModalOverlay.addEventListener('click', (e) => { if (e.target === dirModalOverlay) closeDirModal(); });
+    dirInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') confirmDirBtn.click(); });
+
+    confirmDirBtn.addEventListener('click', () => {
+        let v = dirInput.value.trim();
+        if (!v) { dirInput.focus(); return; }
+        v = v.replace(/\\/g, '/');
+        if (!v.endsWith('/')) v += '/';
+        imgDir = v;
+        localStorage.setItem(LS_DIR_KEY, imgDir);
+        saveLibrary();
+        closeDirModal();
+        renderAll(false);
+    });
+
+    /* =====================================================================
+       单词白名单管理弹窗
+       ===================================================================== */
+    const whitelistModalOverlay = document.getElementById('whitelistModalOverlay');
+    const whitelistInput = document.getElementById('whitelistInput');
+    const whitelistAddBtn = document.getElementById('whitelistAddBtn');
+    const whitelistResetBtn = document.getElementById('whitelistResetBtn');
+    const whitelistCloseBtn = document.getElementById('whitelistCloseBtn');
+    const closeWhitelistModalBtn = document.getElementById('closeWhitelistModalBtn');
+
+    function openWhitelistModal() {
+        renderWhitelistTags();
+        whitelistModalOverlay.classList.add('open');
+        setTimeout(() => whitelistInput.focus(), 50);
+    }
+
+    function closeWhitelistModal() {
+        whitelistModalOverlay.classList.remove('open');
+    }
+
+    document.getElementById('whitelistBtn').addEventListener('click', openWhitelistModal);
+    closeWhitelistModalBtn.addEventListener('click', closeWhitelistModal);
+    whitelistCloseBtn.addEventListener('click', closeWhitelistModal);
+    whitelistModalOverlay.addEventListener('click', (e) => { if (e.target === whitelistModalOverlay) closeWhitelistModal(); });
+
+    whitelistAddBtn.addEventListener('click', () => {
+        const word = whitelistInput.value.trim();
+        if (addToWhitelist(word)) {
+            whitelistInput.value = '';
+            whitelistInput.focus();
+        } else {
+            alert('单词无效或已存在于白名单中');
+        }
+    });
+
+    whitelistInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') whitelistAddBtn.click();
+    });
+
+    whitelistResetBtn.addEventListener('click', () => {
+        if (confirm('确定要恢复默认白名单吗？当前自定义的单词将被清除。')) {
+            resetWhitelist();
+        }
+    });
+
+    /* =====================================================================
+       搜索功能
+       ===================================================================== */
+    function performSearch() {
+        searchQuery = searchInput.value.trim();
+        renderTree();
+        updateClearBtn();
+    }
+
+    function clearSearch() {
+        searchInput.value = '';
+        searchQuery = '';
+        renderTree();
+        updateClearBtn();
+        searchInput.focus();
+    }
+
+    function updateClearBtn() {
+        const hasText = searchInput.value.trim().length > 0;
+        clearSearchBtn.classList.toggle('visible', hasText);
+    }
+
+    searchBtn.addEventListener('click', performSearch);
+    searchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            performSearch();
+        }
+    });
+    searchInput.addEventListener('input', () => {
+        searchQuery = searchInput.value.trim();
+        renderTree();
+        updateClearBtn();
+    });
+    clearSearchBtn.addEventListener('click', clearSearch);
+
+    document.getElementById('newFolderBtn').addEventListener('click', () => {
+        const parentId = selectedFolderId;
+        const depth = parentId ? getNodeDepth(library, parentId) + 1 : 0;
+        if (depth > 3) { alert('最多支持3级文件夹'); return; }
+        openNewFolderModal(parentId);
+    });
+
+    /* =====================================================================
+       导出 / 导入 备份 按钮事件 - 使用增强版函数
+       ===================================================================== */
+    document.getElementById('exportBackupBtn').addEventListener('click', exportBackup);
+
+    document.getElementById('importBackupBtn').addEventListener('click', () => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.json,application/json';
+        input.style.display = 'none';
+        document.body.appendChild(input);
+        input.addEventListener('change', (e) => {
+            if (e.target.files && e.target.files.length > 0) {
+                importBackup(e.target.files[0]);
+            }
+            input.remove();
+        });
+        input.click();
+    });
+
+    /* =====================================================================
+       ===== 使用说明弹窗 =====
+       ===================================================================== */
+    const helpModalOverlay = document.getElementById('helpModalOverlay');
+    const closeHelpModalBtn = document.getElementById('closeHelpModalBtn');
+    const helpCloseBtn = document.getElementById('helpCloseBtn');
+    const helpBtn = document.getElementById('helpBtn');
+
+    function openHelpModal() {
+        helpModalOverlay.classList.add('open');
+    }
+
+    function closeHelpModal() {
+        helpModalOverlay.classList.remove('open');
+    }
+
+    helpBtn.addEventListener('click', openHelpModal);
+    closeHelpModalBtn.addEventListener('click', closeHelpModal);
+    helpCloseBtn.addEventListener('click', closeHelpModal);
+    helpModalOverlay.addEventListener('click', (e) => {
+        if (e.target === helpModalOverlay) closeHelpModal();
+    });
+
+    /* =====================================================================
+       Init
+       ===================================================================== */
+    function ensureSortKeys(nodes) {
+        if(!nodes || !Array.isArray(nodes)) return;
+        nodes.forEach((node, index) => {
+            if (node.sortKey === undefined || node.sortKey === null) {
+                node.sortKey = index + 1;
+            }
+            if (node.type === 'folder' && node.children) {
+                ensureSortKeys(node.children);
+            }
+        });
+    }
+    ensureSortKeys(library);
+    sortNodes(library);
+
+    const allStoriesFinal = getAllStories(library);
+    if (allStoriesFinal.length > 0 && !currentStoryId) {
+        currentStoryId = allStoriesFinal[0].id;
+        localStorage.setItem('wib:currentStoryId', currentStoryId);
+    }
+
+    renderAll(true);
+</script>
+</body>
+</html>
