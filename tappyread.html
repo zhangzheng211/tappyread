@@ -1344,7 +1344,7 @@
 
     // 默认图片目录：优先使用腾讯云COS，同时保留本地目录作为回退
     const DEFAULT_COS_DIR = 'https://tappyreadjpeg-1325106148.cos.ap-guangzhou.myqcloud.com/jpeg/';
-    const DEFAULT_LOCAL_DIR = '/Users/zhangzheng/Documents/01个人生活/05教育辅导/英语辅导/9.牛津阅读树/牛津阅读树stage 1的各个系列/jpeg/';
+    const DEFAULT_LOCAL_DIR = 'https://tappyreadjpeg-1325106148.cos.ap-guangzhou.myqcloud.com/jpeg/';
 
     // 从 localStorage 读取，如果没有则使用COS作为默认值（线上环境优先）
     let imgDir = localStorage.getItem(LS_DIR_KEY);
