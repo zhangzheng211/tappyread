@@ -31,7 +31,7 @@
                 repeating-linear-gradient(45deg, transparent, transparent 40px, rgba(255,220,160,0.05) 40px, rgba(255,220,160,0.05) 80px);
         }
 
-        /* ===== 登录卡片（卡通风格，与点读机同款） ===== */
+        /* ===== 登录卡片（增强版） ===== */
         .login-card {
             width: 100%;
             max-width: 440px;
@@ -46,8 +46,12 @@
             background-image:
                 radial-gradient(circle at 20% 30%, rgba(255,215,150,0.25) 0%, transparent 60%),
                 repeating-linear-gradient(45deg, transparent, transparent 30px, rgba(255,220,160,0.04) 30px, rgba(255,220,160,0.04) 60px);
+            animation: floatCard 0.35s ease-out;
         }
-        /* 圆点装饰边框 */
+        @keyframes floatCard {
+            from { opacity: 0; transform: translateY(10px) scale(0.98); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
+        }
         .login-card::before {
             content: '';
             position: absolute;
@@ -65,7 +69,6 @@
             margin-bottom: 24px;
         }
 
-        /* ===== Logo 图片样式 - 右移居中，位于标题正上方 ===== */
         .login-card .logo-area .icon-big {
             display: flex;
             justify-content: center;
@@ -77,6 +80,7 @@
             height: 60px;
             object-fit: contain;
             display: block;
+            filter: drop-shadow(0 6px 10px rgba(93, 58, 26, 0.12));
         }
 
         .login-card .logo-area h1 {
@@ -108,15 +112,18 @@
             font-weight: 800;
             font-size: 15px;
             color: #5D3A1A;
-            margin-bottom: 4px;
+            margin-bottom: 6px;
             letter-spacing: 0.5px;
         }
         .login-card .field label .emoji {
             margin-right: 6px;
         }
+        .login-card .input-wrap {
+            position: relative;
+        }
         .login-card .field input {
             width: 100%;
-            padding: 12px 16px;
+            padding: 12px 48px 12px 16px;
             font-family: 'Nunito', sans-serif;
             font-size: 16px;
             font-weight: 600;
@@ -132,9 +139,58 @@
             border-color: #4D7A9C;
             box-shadow: 0 0 0 4px rgba(77, 122, 156, 0.12), inset 0 2px 6px rgba(200,150,100,0.06);
         }
+        .login-card .field input.input-error {
+            border-color: #C0392B;
+            box-shadow: 0 0 0 4px rgba(192,57,43,0.08), inset 0 2px 6px rgba(200,150,100,0.06);
+        }
         .login-card .field input::placeholder {
             color: #B8A898;
             font-weight: 400;
+        }
+        .login-card .toggle-password {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 30px;
+            height: 30px;
+            border: none;
+            background: transparent;
+            color: #7B6A5E;
+            cursor: pointer;
+            border-radius: 50%;
+            font-size: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.15s ease, transform 0.15s ease;
+        }
+        .login-card .toggle-password:hover {
+            background: rgba(77,122,156,0.08);
+        }
+        .login-card .toggle-password:active {
+            transform: translateY(-50%) scale(0.95);
+        }
+
+        .login-card .helper-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: -4px 0 14px;
+            gap: 12px;
+            font-size: 12px;
+            color: #866D58;
+            font-weight: 700;
+        }
+        .login-card .helper-row .remember {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .login-card .helper-row input[type="checkbox"] {
+            accent-color: #4D7A9C;
+            width: 14px;
+            height: 14px;
         }
 
         .login-card .login-btn {
@@ -157,12 +213,36 @@
             justify-content: center;
             gap: 10px;
         }
+        .login-card .login-btn:disabled {
+            opacity: 0.9;
+            cursor: wait;
+        }
         .login-card .login-btn:active {
             transform: translateY(4px);
             box-shadow: 0 2px 0 #1A3A5A;
         }
-        .login-card .login-btn:hover {
+        .login-card .login-btn:hover:not(:disabled) {
             background: #5A8AAC;
+        }
+        .login-card .login-btn.is-loading {
+            background: #3E8E5A;
+            border-color: #245c37;
+            box-shadow: 0 6px 0 #1c4a2c;
+        }
+        .login-card .login-btn .spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255,255,255,0.55);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            display: none;
+        }
+        .login-card .login-btn.is-loading .spinner {
+            display: inline-block;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
         }
 
         .login-card .error-msg {
@@ -180,6 +260,11 @@
         }
         .login-card .error-msg.show {
             display: block;
+        }
+        .login-card .error-msg.success {
+            color: #2A7A4A;
+            background: rgba(62, 142, 90, 0.08);
+            border-color: rgba(62, 142, 90, 0.20);
         }
 
         .login-card .footer-note {
@@ -201,7 +286,6 @@
             100% { opacity: 1; transform: scale(1.05); }
         }
 
-        /* 响应式 */
         @media (max-width: 500px) {
             .login-card {
                 padding: 28px 20px 32px;
@@ -215,7 +299,7 @@
                 height: 48px;
             }
             .login-card .field input {
-                padding: 10px 14px;
+                padding: 10px 42px 10px 14px;
                 font-size: 15px;
             }
             .login-card .login-btn {
@@ -244,20 +328,32 @@
         <!-- 用户名 -->
         <div class="field">
             <label><span class="emoji">👤</span> 用户名</label>
-            <input type="text" id="usernameInput" placeholder="请输入用户名" autocomplete="username">
+            <div class="input-wrap">
+                <input type="text" id="usernameInput" placeholder="请输入用户名" autocomplete="username">
+            </div>
         </div>
 
         <!-- 密码 -->
         <div class="field">
             <label><span class="emoji">🔒</span> 密码</label>
-            <input type="password" id="passwordInput" placeholder="请输入密码" autocomplete="current-password">
+            <div class="input-wrap">
+                <input type="password" id="passwordInput" placeholder="请输入密码" autocomplete="current-password">
+                <button type="button" class="toggle-password" id="togglePassword" aria-label="显示或隐藏密码">👁️</button>
+            </div>
+        </div>
+
+        <div class="helper-row">
+            <label class="remember"><input type="checkbox" id="rememberUser"> 记住账号</label>
         </div>
 
         <!-- 错误提示 -->
         <div class="error-msg" id="errorMsg">❌ 用户名或密码错误，请重试</div>
 
         <!-- 登录按钮 -->
-        <button class="login-btn" id="loginBtn">🔓 登 录</button>
+        <button class="login-btn" id="loginBtn" type="button">
+            <span class="spinner" aria-hidden="true"></span>
+            <span class="btn-text">🔓 登 录</span>
+        </button>
 
         <div class="footer-note">
             <span>🌟</span> 用自己拥有的图片，一分钟制作一本点读书 <span>🌟</span>
@@ -266,96 +362,159 @@
 
     <script>
         (function() {
-            // ===== DOM 引用 =====
             const usernameInput = document.getElementById('usernameInput');
             const passwordInput = document.getElementById('passwordInput');
             const loginBtn = document.getElementById('loginBtn');
             const errorMsg = document.getElementById('errorMsg');
+            const togglePassword = document.getElementById('togglePassword');
+            const rememberUser = document.getElementById('rememberUser');
+            const btnText = loginBtn.querySelector('.btn-text');
+            const REDIRECT_URL = 'showfirst.html';
+            const USER_FILE = './user';
+            let isSubmitting = false;
 
-            // ===== 固定内置用户 (仅 admin / admin!) =====
-            const VALID_USERNAME = 'admin';
-            const VALID_PASSWORD = 'admin!';
+            function setInputError(input, hasError) {
+                input.classList.toggle('input-error', hasError);
+            }
 
-            // ===== 登录验证 =====
-            function handleLogin() {
+            function setError(message, isSuccess = false) {
+                errorMsg.textContent = message;
+                errorMsg.classList.toggle('show', Boolean(message));
+                errorMsg.classList.toggle('success', isSuccess);
+                errorMsg.style.color = isSuccess ? '#2A7A4A' : '#C0392B';
+                errorMsg.style.background = isSuccess ? 'rgba(62, 142, 90, 0.08)' : 'rgba(192, 57, 43, 0.06)';
+                errorMsg.style.borderColor = isSuccess ? 'rgba(62, 142, 90, 0.20)' : 'rgba(192, 57, 43, 0.10)';
+            }
+
+            function parseCsvRow(line) {
+                return line.replace(/^\uFEFF/, '').split(',').map(part => part.trim().replace(/^"|"$/g, ''));
+            }
+
+            async function loadUserCredentials() {
+                try {
+                    const response = await fetch(new URL(USER_FILE, document.baseURI), {
+                        cache: 'no-store',
+                        credentials: 'same-origin'
+                    });
+                    if (!response.ok) {
+                        throw new Error('user file not found');
+                    }
+                    const text = await response.text();
+                    const rows = text.split(/\r?\n/).map(row => row.trim()).filter(Boolean);
+                    if (rows.length < 2) {
+                        return [];
+                    }
+                    const headers = parseCsvRow(rows[0]).map(header => header.toLowerCase());
+                    const usernameIndex = headers.indexOf('username');
+                    const passwordIndex = headers.indexOf('password');
+                    if (usernameIndex >= 0 && passwordIndex >= 0) {
+                        return rows.slice(1).map(row => {
+                            const values = parseCsvRow(row);
+                            return {
+                                username: values[usernameIndex] || '',
+                                password: values[passwordIndex] || ''
+                            };
+                        }).filter(item => item.username && item.password);
+                    }
+                    return rows.map(parseCsvRow).filter(values => values.length >= 2).map(values => ({
+                        username: values[0],
+                        password: values[1]
+                    })).filter(item => item.username && item.password && item.username !== 'username');
+                } catch (error) {
+                    console.warn('Failed to load user file:', error);
+                    return [];
+                }
+            }
+
+            function redirectToMainPage() {
+                window.location.href = REDIRECT_URL;
+            }
+
+            async function handleLogin() {
+                if (isSubmitting) return;
+
                 const username = usernameInput.value.trim();
                 const password = passwordInput.value.trim();
 
-                // 清除旧错误
-                errorMsg.classList.remove('show');
-                errorMsg.style.color = '#C0392B';
-                errorMsg.style.background = 'rgba(192, 57, 43, 0.06)';
-                errorMsg.style.borderColor = 'rgba(192, 57, 43, 0.10)';
+                setInputError(usernameInput, false);
+                setInputError(passwordInput, false);
+                setError('');
 
-                // 基本校验
                 if (!username) {
-                    errorMsg.textContent = '⚠️ 请输入用户名';
-                    errorMsg.classList.add('show');
+                    setInputError(usernameInput, true);
+                    setError('⚠️ 请输入用户名');
                     usernameInput.focus();
                     return;
                 }
                 if (!password) {
-                    errorMsg.textContent = '⚠️ 请输入密码';
-                    errorMsg.classList.add('show');
+                    setInputError(passwordInput, true);
+                    setError('⚠️ 请输入密码');
                     passwordInput.focus();
                     return;
                 }
 
-                // 固定用户验证
-                if (username !== VALID_USERNAME || password !== VALID_PASSWORD) {
-                    errorMsg.textContent = '❌ 用户名或密码错误，请重试';
-                    errorMsg.classList.add('show');
+                isSubmitting = true;
+                loginBtn.disabled = true;
+                loginBtn.classList.add('is-loading');
+                btnText.textContent = '登录中...';
+
+                const accounts = await loadUserCredentials();
+                const matched = accounts.some(item => item.username === username && item.password === password);
+
+                if (!matched) {
+                    loginBtn.classList.remove('is-loading');
+                    loginBtn.disabled = false;
+                    btnText.textContent = '🔓 登 录';
+                    isSubmitting = false;
+                    setInputError(usernameInput, true);
+                    setInputError(passwordInput, true);
+                    setError('❌ 用户名或密码错误，请重试');
                     passwordInput.focus();
                     passwordInput.select();
                     return;
                 }
 
-                // ===== 登录成功 =====
-                errorMsg.classList.remove('show');
+                if (rememberUser.checked) {
+                    localStorage.setItem('tappyread_last_user', username);
+                } else {
+                    localStorage.removeItem('tappyread_last_user');
+                }
 
-                const btn = loginBtn;
-                const originalText = btn.innerHTML;
-                btn.innerHTML = '✅ 登录成功，跳转中...';
-                btn.style.background = '#3E8E5A';
-                btn.style.borderColor = '#245c37';
-                btn.style.boxShadow = '0 6px 0 #1c4a2c';
-                btn.disabled = true;
-
-                // 1.5秒后跳转
+                setError('✅ 登录成功，正在跳转...', true);
                 setTimeout(() => {
-                    window.location.href = 'showfirst.html';
-                }, 1500);
-
-                // 备用：如果 3 秒后还在当前页，提示用户手动跳转
-                setTimeout(() => {
-                    if (!window.location.href.includes('tappyread')) {
-                        btn.innerHTML = '🔓 点击手动跳转';
-                        btn.style.background = '#4D7A9C';
-                        btn.style.borderColor = '#2A5A7A';
-                        btn.style.boxShadow = '0 6px 0 #1A3A5A';
-                        btn.disabled = false;
-                        btn.onclick = function() {
-                            window.location.href = 'showfirst.html';
-                        };
-                        errorMsg.textContent = '✅ 登录验证通过！点击按钮手动跳转至首页';
-                        errorMsg.style.color = '#2A7A4A';
-                        errorMsg.style.background = 'rgba(62, 142, 90, 0.08)';
-                        errorMsg.style.borderColor = 'rgba(62, 142, 90, 0.20)';
-                        errorMsg.classList.add('show');
-                    }
-                }, 3000);
+                    redirectToMainPage();
+                }, 400);
             }
 
-            // ===== 事件绑定 =====
+            const savedUser = localStorage.getItem('tappyread_last_user');
+            if (savedUser) {
+                usernameInput.value = savedUser;
+                rememberUser.checked = true;
+            }
+
             loginBtn.addEventListener('click', handleLogin);
 
-            // 回车键触发登录
+            usernameInput.addEventListener('input', () => {
+                if (errorMsg.classList.contains('show')) {
+                    setError('');
+                }
+                setInputError(usernameInput, false);
+            });
+
+            passwordInput.addEventListener('input', () => {
+                if (errorMsg.classList.contains('show')) {
+                    setError('');
+                }
+                setInputError(passwordInput, false);
+            });
+
             usernameInput.addEventListener('keydown', function(e) {
                 if (e.key === 'Enter') {
                     e.preventDefault();
                     passwordInput.focus();
                 }
             });
+
             passwordInput.addEventListener('keydown', function(e) {
                 if (e.key === 'Enter') {
                     e.preventDefault();
@@ -363,8 +522,13 @@
                 }
             });
 
-            // ===== 控制台提示（调试用，前端不显示用户信息） =====
-            console.log('🔐 内置管理员账户: admin / admin!');
+            togglePassword.addEventListener('click', function() {
+                const isPassword = passwordInput.type === 'password';
+                passwordInput.type = isPassword ? 'text' : 'password';
+                togglePassword.textContent = isPassword ? '🙈' : '👁️';
+                togglePassword.setAttribute('aria-label', isPassword ? '隐藏密码' : '显示密码');
+                passwordInput.focus();
+            });
         })();
     </script>
 

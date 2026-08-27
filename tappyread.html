@@ -56,13 +56,36 @@
         }
         .sidebar{
             width:340px; flex:none;
+            height:100%;
+            margin-top:0;
             background:rgba(255,246,228,0.92);
             border:3px solid var(--tent-navy);
             border-radius:22px;
             box-shadow: 0 10px 0 rgba(38,41,107,0.18);
             display:flex; flex-direction:column;
             min-height:0;
-            overflow:hidden;
+            overflow:visible;
+            position:relative;
+            transition: width .28s cubic-bezier(.22,1,.36,1), min-width .28s cubic-bezier(.22,1,.36,1), transform .28s ease, opacity .2s ease;
+        }
+        .sidebar.collapsed{
+            width:20px;
+            min-width:20px;
+            border-color:transparent;
+            box-shadow:none;
+        }
+        .sidebar.collapsed .sidebar-head .title,
+        .sidebar.collapsed .search-row,
+        .sidebar.collapsed .tree,
+        .sidebar.collapsed .sidebar-head .head-actions{
+            display:none;
+        }
+        .sidebar.collapsed .sidebar-head{
+            justify-content:center;
+            padding:8px 6px;
+        }
+        .sidebar.collapsed .sidebar-head .sidebar-toggle{
+            transform:translateY(-50%);
         }
         .sidebar-head{
             display:flex; align-items:center; justify-content:space-between;
@@ -70,6 +93,7 @@
             border-bottom:3px dotted rgba(38,41,107,0.25);
             flex-wrap:wrap;
             gap:6px;
+            padding-right:40px;
         }
         .sidebar-head .title{
             font-family:'Baloo 2',sans-serif; font-weight:700; font-size:15px;
@@ -120,10 +144,58 @@
             align-items:center;
             flex:0 0 auto;
         }
+        .sidebar-toggle{
+            font-family:'Baloo 2',sans-serif;
+            font-weight:700;
+            border-radius:999px;
+            border:2.5px solid var(--tent-navy);
+            box-shadow: var(--btn-shadow);
+            cursor:pointer;
+            display:inline-flex;
+            align-items:center;
+            justify-content:center;
+            background:#fff;
+            color:var(--tent-navy);
+            min-width:34px;
+            min-height:34px;
+            padding:6px 10px;
+            transition:opacity .2s ease, transform .2s ease, box-shadow .15s ease;
+        }
+        .sidebar-toggle{
+            position:absolute;
+            top:50%;
+            right:-18px;
+            left:auto;
+            transform:translateY(-50%);
+            z-index:30;
+            width:34px;
+            height:34px;
+            min-width:34px;
+            min-height:34px;
+            padding:0;
+            line-height:1;
+            font-size:18px;
+            box-shadow:0 6px 0 rgba(38,41,107,0.14);
+        }
+        .sidebar-toggle:active{ transform:translateY(2px); box-shadow:none; }
+        .sidebar.collapsed .sidebar-toggle{
+            opacity:1;
+            pointer-events:auto;
+            position:absolute;
+            right:-18px;
+            left:auto;
+            top:50%;
+            transform:translateY(-50%);
+        }
+        body.reader-edge-left .sidebar.collapsed .sidebar-toggle{
+            opacity:1;
+            pointer-events:auto;
+            transform:translateY(-50%);
+        }
         .topbar .right-group{
             display:flex;
-            align-items:center;
             gap:8px;
+            align-items:center;
             flex-wrap:wrap;
             justify-content:flex-end;
             flex:1 1 auto;
@@ -394,12 +466,44 @@
             flex:1; min-width:0;
             display:flex; flex-direction:column;
             min-height:0;
+            height:100%;
         }
 
         .stage-wrap{
             flex:1; min-height:0;
             display:flex; flex-direction:column; align-items:center;
             gap:8px;
+        }
+        .reader-meta-row{
+            flex:none;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            gap:18px;
+            width:100%;
+            max-width:1180px;
+            min-height:24px;
+            padding:0 60px;
+            box-sizing:border-box;
+            position:relative;
+        }
+        .fullscreen-hint{
+            flex:none;
+            color:rgba(80,80,80,0.78);
+            font-size:12px;
+            font-weight:600;
+            letter-spacing:0;
+            text-align:left;
+            white-space:nowrap;
+            position:absolute;
+            right:60px;
+        }
+        .story-meta-center{
+            display:flex;
+            flex-direction:column;
+            align-items:center;
+            justify-content:center;
+            gap:4px;
         }
         .spread-tag{
             font-family:'Baloo 2',sans-serif; font-weight:700; font-size:13px;
@@ -454,6 +558,75 @@
         .page-img-box img{
             max-width:100%; max-height:100%; object-fit:contain;
             border-radius:10px;
+        }
+        body.reader-fullscreen .topbar,
+        body.reader-fullscreen .sidebar,
+        body.reader-fullscreen .story-caption,
+        body.reader-fullscreen .spread-tag,
+        body.reader-fullscreen .reader-meta-row,
+        body.reader-fullscreen .nav-btn,
+        body.reader-fullscreen .page-caption-bar{
+            display:none !important;
+        }
+        body.reader-fullscreen .app {
+            padding:0;
+            gap:0;
+            height:100vh;
+        }
+        body.reader-fullscreen .main {
+            width:100vw;
+            height:100vh;
+            min-height:100vh;
+            flex:1;
+        }
+        body.reader-fullscreen .stage-wrap {
+            width:100vw;
+            height:100vh;
+            min-height:100vh;
+            padding:0;
+            margin:0;
+        }
+        body.reader-fullscreen .spread-row {
+            width:100vw;
+            max-width:none;
+            height:100vh;
+            padding:0 10px 10px;
+        }
+        body.reader-fullscreen .page-panel {
+            min-height:0;
+            border-radius:0;
+        }
+        .stage-wrap:fullscreen,
+        .stage-wrap:-webkit-full-screen{
+            width:100vw;
+            height:100vh;
+            min-height:100vh;
+            padding:0;
+            margin:0;
+            background:var(--tent-navy);
+        }
+        .stage-wrap:fullscreen .spread-row,
+        .stage-wrap:-webkit-full-screen .spread-row{
+            width:100vw;
+            height:100vh;
+            max-width:none;
+            padding:0 10px 10px;
+        }
+        .stage-wrap:fullscreen .page-panel,
+        .stage-wrap:-webkit-full-screen .page-panel{
+            min-height:0;
+            border-radius:0;
+        }
+        .stage-wrap:fullscreen .page-img-box,
+        .stage-wrap:-webkit-full-screen .page-img-box{
+            min-height:0;
+        }
+        .stage-wrap:fullscreen .page-img-box img,
+        .stage-wrap:-webkit-full-screen .page-img-box img{
+            max-width:100%;
+            max-height:100%;
+            width:auto;
+            height:auto;
         }
         .ripple{
             position:absolute; border-radius:50%;
@@ -844,9 +1017,37 @@
         @media (max-width: 860px){
             .spread{ flex-direction:column; }
             .page-caption-bar{ max-height:26%; }
+            .reader-meta-row{
+                align-self:stretch;
+                width:auto;
+                max-width:none;
+                padding:0;
+                gap:10px;
+                flex-wrap:wrap;
+                justify-content:center;
+            }
+            .fullscreen-hint{
+                position:static;
+                white-space:normal;
+            }
+            .story-meta-center{ order:-1; }
             .sidebar{ position:fixed; left:14px; top:14px; bottom:14px; z-index:150;
-                transform:translateX(-120%); transition:transform .25s ease; width:85vw; max-width:300px; }
+                transform:translateX(-120%); transition:transform .25s ease; width:85vw; max-width:300px;
+                height:auto; margin-top:0; }
+            .sidebar.collapsed{
+                width:85vw;
+                min-width:0;
+                border-color:var(--tent-navy);
+                box-shadow:0 10px 0 rgba(38,41,107,0.18);
+                transform:translateX(-120%);
+            }
             .sidebar.open{ transform:translateX(0); }
+            .sidebar.open.collapsed{ transform:translateX(0); }
+            .sidebar.open .sidebar-toggle,
+            .sidebar.open.collapsed .sidebar-toggle{
+                opacity:1;
+                pointer-events:auto;
+            }
             .mobile-menu-btn{
                 display:inline-flex !important;
                 align-items:center;
@@ -864,7 +1065,7 @@
             }
             .topbar .right-group{
                 flex:1 1 100%;
-                justify-content:flex-start;
+                justify-content:flex-end;
                 margin-top:4px;
             }
             .voice-pill select.voice-select{ max-width:96px; }
@@ -887,6 +1088,7 @@
 
     <aside class="sidebar" id="sidebar">
         <div class="sidebar-head">
+            <button class="sidebar-toggle" id="sidebarToggleBtn" title="收起/展开目录">◀</button>
             <div class="title">📚 绘本目录</div>
             <div class="head-actions">
                 <button class="head-btn head-btn-new" id="newFolderBtn">✨ 新建</button>
@@ -911,12 +1113,10 @@
             </div>
             <div class="right-group">
                 <button class="action-btn action-btn-pink" id="helpBtn">❓ 使用说明</button>
-                <!-- 新增：PDF转图片 按钮 (青绿色) -->
                 <button class="action-btn action-btn-teal" id="pdfConvertBtn">📄 PDF转图片</button>
                 <button class="action-btn action-btn-primary" id="batchImportBtn">📦 批量导入绘本</button>
                 <button class="action-btn action-btn-blue" id="newStoryBtn">📖 新增绘本</button>
                 <button class="add-page-btn" id="openAddModalBtn">➕ 添加绘本页面</button>
-                <button class="action-btn action-btn-purple" id="whitelistBtn" style="border-color:#7D3C98;">📝 单词白名单</button>
                 <button class="action-btn action-btn-orange" id="dirSettingBtn">📁 图片目录</button>
                 <div class="voice-pill" title="朗读设置">
                     <span class="voice-icon">🎙️</span>
@@ -929,8 +1129,13 @@
         </div>
 
         <div class="stage-wrap">
-            <div class="story-caption" id="storyCaption"></div>
-            <div class="spread-tag" id="spreadTag">1–2 / 5</div>
+            <div class="reader-meta-row">
+                <div class="story-meta-center">
+                    <div class="story-caption" id="storyCaption"></div>
+                    <div class="spread-tag" id="spreadTag">1–2 / 5</div>
+                </div>
+                <div class="fullscreen-hint">双击绘本可进入全屏阅读模式</div>
+            </div>
             <div class="spread-row">
                 <div class="nav-btn" id="prevBtn">◀</div>
                 <div class="spread" id="spread"></div>
@@ -1622,16 +1827,18 @@
         }
         // 3. 从配置的 imgDir 加载（支持本地路径和COS地址）
         if(page.file) {
-            const fileName = page.file;
+            const fileName = String(page.file).trim();
+            if (/^(https?:|data:|blob:|file:)/i.test(fileName)) {
+                return fileName;
+            }
             // 判断 imgDir 是否为网络地址
             if (imgDir.startsWith('http://') || imgDir.startsWith('https://')) {
-                // 网络地址：使用 encodeURIComponent 确保特殊字符被编码
-                // 但保留文件扩展名中的点号，避免被编码
-                const encodedFileName = encodeURIComponent(fileName).replace(/%2E/g, '.');
-                return imgDir + encodedFileName;
+                const baseUrl = imgDir.endsWith('/') ? imgDir : imgDir + '/';
+                return new URL(encodeURIComponent(fileName), baseUrl).href;
             } else {
                 // 本地文件路径：使用 file:// 协议
-                return encodeURI('file://' + imgDir + fileName);
+                const localDir = imgDir.endsWith('/') ? imgDir : imgDir + '/';
+                return encodeURI('file://' + localDir + fileName);
             }
         }
         return '';
@@ -2362,16 +2569,21 @@
     const voiceSelect = document.getElementById('voiceSelect');
     const rateRange = document.getElementById('rateRange');
     const sidebar = document.getElementById('sidebar');
+    const sidebarToggleBtn = document.getElementById('sidebarToggleBtn');
     const mobileMenuBtn = document.getElementById('mobileMenuBtn');
     const searchInput = document.getElementById('searchInput');
     const searchBtn = document.getElementById('searchBtn');
     const clearSearchBtn = document.getElementById('clearSearchBtn');
+    const stageWrap = document.querySelector('.stage-wrap');
 
     /* =====================================================================
        Speech
        ===================================================================== */
     let voices = [];
+    let speechSessionId = 0;
+
     function loadVoices(){
+        if(!('speechSynthesis' in window)) return;
         voices = speechSynthesis.getVoices();
         const rank = v => {
             const n = (v.name+v.lang).toLowerCase();
@@ -2406,32 +2618,68 @@
         return utter;
     }
 
+    function stopSpeechSoft(){
+        if('speechSynthesis' in window){
+            try { speechSynthesis.cancel(); } catch (error) { /* noop */ }
+            try { if (typeof speechSynthesis.resume === 'function') speechSynthesis.resume(); } catch (error) { /* noop */ }
+        }
+    }
+
     function speakOne(text, indicatorEl){
         if(!('speechSynthesis' in window) || !text) return;
-        speechSynthesis.cancel();
+        const token = ++speechSessionId;
+        stopSpeechSoft();
         const utter = makeUtterance(text);
+        const finalize = ()=> {
+            if(token !== speechSessionId) return;
+            if(indicatorEl) indicatorEl.classList.remove('speaking');
+        };
         if(indicatorEl){
-            utter.onstart = ()=> indicatorEl.classList.add('speaking');
-            utter.onend = ()=> indicatorEl.classList.remove('speaking');
-            utter.onerror = ()=> indicatorEl.classList.remove('speaking');
+            utter.onstart = ()=> {
+                if(token === speechSessionId) indicatorEl.classList.add('speaking');
+            };
+            utter.onend = finalize;
+            utter.onerror = finalize;
         }
-        speechSynthesis.speak(utter);
+        try {
+            speechSynthesis.speak(utter);
+        } catch (error) {
+            if(indicatorEl) indicatorEl.classList.remove('speaking');
+        }
     }
 
     function speakSequence(items){
         if(!('speechSynthesis' in window) || !items.length) return;
-        speechSynthesis.cancel();
+        const token = ++speechSessionId;
+        stopSpeechSoft();
         let i = 0;
         function next(){
-            if(i >= items.length) return;
+            if(token !== speechSessionId) return;
+            if(i >= items.length){
+                items.forEach(({indicatorEl}) => { if(indicatorEl) indicatorEl.classList.remove('speaking'); });
+                return;
+            }
             const { text, indicatorEl } = items[i++];
             const utter = makeUtterance(text);
-            if(indicatorEl){
-                utter.onstart = ()=> indicatorEl.classList.add('speaking');
+            utter.onstart = ()=> {
+                if(token === speechSessionId && indicatorEl) indicatorEl.classList.add('speaking');
+            };
+            utter.onend = ()=> {
+                if(token !== speechSessionId) return;
+                if(indicatorEl) indicatorEl.classList.remove('speaking');
+                next();
+            };
+            utter.onerror = ()=> {
+                if(token !== speechSessionId) return;
+                if(indicatorEl) indicatorEl.classList.remove('speaking');
+                next();
+            };
+            try {
+                speechSynthesis.speak(utter);
+            } catch (error) {
+                if(indicatorEl) indicatorEl.classList.remove('speaking');
+                next();
             }
-            utter.onend = ()=>{ if(indicatorEl) indicatorEl.classList.remove('speaking'); next(); };
-            utter.onerror = ()=>{ if(indicatorEl) indicatorEl.classList.remove('speaking'); next(); };
-            speechSynthesis.speak(utter);
         }
         next();
     }
@@ -2889,6 +3137,10 @@
             spawnRipple(e, imgBox);
             speakOne(page.text || 'This page has no words.', speaker);
         });
+        imgBox.addEventListener('dblclick', (e)=>{
+            e.preventDefault();
+            toggleReaderFullscreen();
+        });
 
         const editBtn = document.createElement('div');
         editBtn.className = 'mini-edit-btn';
@@ -3109,13 +3361,77 @@
         if(e.key === 'ArrowRight') nextBtn.click();
     });
 
-    mobileMenuBtn.addEventListener('click', ()=> sidebar.classList.toggle('open'));
+    function applySidebarState(collapsed){
+        sidebar.classList.toggle('collapsed', collapsed);
+        sidebarToggleBtn.textContent = collapsed ? '▶' : '◀';
+        sidebarToggleBtn.title = collapsed ? '展开目录' : '收起目录';
+        localStorage.setItem('tappyread-sidebar-collapsed', String(collapsed));
+    }
+
+    function setReaderFullscreen(isFullscreen) {
+        if (!stageWrap) return;
+        document.body.classList.toggle('reader-fullscreen', isFullscreen);
+        requestAnimationFrame(() => renderSpread(false));
+    }
+
+    function toggleReaderFullscreen(){
+        if (!document.fullscreenElement && stageWrap) {
+            const request = stageWrap.requestFullscreen || stageWrap.webkitRequestFullscreen || stageWrap.mozRequestFullScreen || stageWrap.msRequestFullscreen;
+            if (request) request.call(stageWrap);
+            return;
+        }
+        const exit = document.exitFullscreen || document.webkitExitFullscreen || document.mozCancelFullScreen || document.msExitFullscreen;
+        if (exit) exit.call(document);
+    }
+
+    document.addEventListener('fullscreenchange', () => {
+        setReaderFullscreen(Boolean(document.fullscreenElement));
+    });
+    document.addEventListener('webkitfullscreenchange', () => {
+        setReaderFullscreen(Boolean(document.webkitFullscreenElement));
+    });
+    document.addEventListener('mozfullscreenchange', () => {
+        setReaderFullscreen(Boolean(document.mozFullScreen));
+    });
+
+    function updateEdgeRevealState(event) {
+        if (!document.body || document.body.classList.contains('reader-fullscreen')) {
+            document.body.classList.remove('reader-edge-left');
+            return;
+        }
+        const x = event ? event.clientX : 0;
+        const sidebarCollapsed = sidebar.classList.contains('collapsed');
+        document.body.classList.toggle('reader-edge-left', sidebarCollapsed && x < 20);
+    }
+
+    document.addEventListener('mousemove', updateEdgeRevealState);
+    document.addEventListener('mouseleave', () => {
+        document.body.classList.remove('reader-edge-left');
+    });
+    window.addEventListener('beforeunload', stopSpeechSoft);
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            stopSpeechSoft();
+        }
+    });
+
+    sidebarToggleBtn.addEventListener('click', () => {
+        const collapsed = !sidebar.classList.contains('collapsed');
+        applySidebarState(collapsed);
+    });
+    mobileMenuBtn.addEventListener('click', (e)=> {
+        e.stopPropagation();
+        sidebar.classList.toggle('open');
+    });
     document.addEventListener('click', (e)=>{
         if(window.innerWidth > 860) return;
-        if(sidebar.classList.contains('open') && !sidebar.contains(e.target) && e.target !== mobileMenuBtn){
+        if(sidebar.classList.contains('open') && !sidebar.contains(e.target) && !mobileMenuBtn.contains(e.target)){
             sidebar.classList.remove('open');
         }
     });
+
+    const initialSidebarCollapsed = false;
+    applySidebarState(initialSidebarCollapsed);
 
     /* =====================================================================
        Folder modal
@@ -4330,7 +4646,6 @@
         whitelistModalOverlay.classList.remove('open');
     }
 
-    document.getElementById('whitelistBtn').addEventListener('click', openWhitelistModal);
     closeWhitelistModalBtn.addEventListener('click', closeWhitelistModal);
     whitelistCloseBtn.addEventListener('click', closeWhitelistModal);
     whitelistModalOverlay.addEventListener('click', (e) => { if (e.target === whitelistModalOverlay) closeWhitelistModal(); });
