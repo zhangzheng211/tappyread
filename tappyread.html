@@ -237,6 +237,7 @@
         .action-btn-purple{ background:#9B59B6; color:#fff; border-color:#7D3C98; }
         .action-btn-orange{ background:#FF9A3D; color:#fff; border-color:#E67E22; }
         .action-btn-pink{ background:#FF6B8A; color:#fff; border-color:#D94560; }
+        .action-btn-html{ background:#7B61C9; color:#fff; border-color:#4D398D; }
         /* 新增 PDF转图片 按钮颜色：青绿色 (Teal) */
         .action-btn-teal{ background:#1ABC9C; color:#fff; border-color:#16A085; }
 
@@ -964,6 +965,8 @@
         }
         .batch-story-item .b-name{ flex:1; font-weight:700; font-size:14px; color:var(--tent-navy); }
         .batch-story-item .b-pages{ font-size:13px; color:#6b5a3f; flex:none; }
+        .batch-story-item .b-preview{ font-size:12px; color:#6b5a3f; max-width:42%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .html-page-box iframe{ width:100%; height:100%; border:0; background:#fff; }
         .batch-story-item .b-status{
             font-size:12px; font-weight:700; padding:2px 12px; border-radius:999px;
             flex:none;
@@ -1113,6 +1116,7 @@
             </div>
             <div class="right-group">
                 <button class="action-btn action-btn-pink" id="helpBtn">❓ 使用说明</button>
+                <button class="action-btn action-btn-html" id="htmlGenerateBtn">⚡ 一键生成</button>
                 <button class="action-btn action-btn-teal" id="pdfConvertBtn">📄 PDF转图片</button>
                 <button class="action-btn action-btn-primary" id="batchImportBtn">📦 批量导入绘本</button>
                 <button class="action-btn action-btn-blue" id="newStoryBtn">📖 新增绘本</button>
@@ -1188,7 +1192,7 @@
 <div class="modal-overlay" id="batchPreviewOverlay">
     <div class="modal-box">
         <div class="modal-header">
-            <h3>📦 批量导入绘本 - 预览</h3>
+            <h3 id="batchPreviewTitle">📦 批量导入绘本 - 预览</h3>
             <button class="modal-close" id="closeBatchPreviewBtn">✕</button>
         </div>
         <div class="modal-body">
@@ -1221,7 +1225,7 @@
             </div>
             <div class="progress-stats">
                 <div>总绘本 <span id="totalStories">0</span></div>
-                <div>总图片 <span id="totalImages">0</span></div>
+                <div><span id="totalItemsLabel">总图片</span> <span id="totalImages">0</span></div>
                 <div>已处理 <span id="processedCount">0</span></div>
             </div>
             <div class="field">
@@ -1604,6 +1608,37 @@
     const LS_FOLDER_KEY = 'wib:selectedFolder';
     const LS_WHITELIST_KEY = 'wib:whitelist';
     const LS_COLLAPSED_KEY = 'wib:collapsed_v2';
+
+    function loadOxfordCorpus() {
+        return fetch('oxford_corpus_complete.json', { cache: 'no-store' })
+            .then(response => {
+                if (!response.ok) throw new Error(`词典加载失败: ${response.status}`);
+                return response.json();
+            })
+            .catch(() => new Promise((resolve, reject) => {
+                const request = new XMLHttpRequest();
+                request.open('GET', 'oxford_corpus_complete.json', true);
+                request.onload = () => {
+                    if (request.status === 0 || (request.status >= 200 && request.status < 300)) {
+                        try {
+                            resolve(JSON.parse(request.responseText));
+                        } catch (error) {
+                            reject(error);
+                        }
+                    } else {
+                        reject(new Error(`词典加载失败: ${request.status}`));
+                    }
+                };
+                request.onerror = () => reject(new Error('词典读取失败'));
+                request.send();
+            }))
+        .catch(error => {
+            console.warn('无法加载 oxford_corpus_complete.json', error);
+            return {};
+        });
+    }
+    const oxfordCorpusPromise = loadOxfordCorpus();
+    window.tappyReadCorpus = oxfordCorpusPromise;
 
     // 默认图片目录：优先使用腾讯云COS，同时保留本地目录作为回退
     const DEFAULT_COS_DIR = 'https://tappyreadjpeg-1325106148.cos.ap-guangzhou.myqcloud.com/jpeg/';
@@ -2684,6 +2719,99 @@
         next();
     }
 
+    function ensureHtmlPointReader(html) {
+        const fallbackScript = `<script data-tappy-point-reader="v2">(function(){
+            function speak(text){
+                if(!text || !('speechSynthesis' in window)) return;
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.rate = 0.8;
+                utterance.pitch = 0.92;
+                speechSynthesis.cancel();
+                speechSynthesis.resume();
+                speechSynthesis.speak(utterance);
+            }
+            function bind(){
+                document.querySelectorAll('.tappy-word').forEach(word => {
+                    if(word.dataset.tappySpeechBound) return;
+                    word.dataset.tappySpeechBound = '1';
+                    word.addEventListener('click', event => { event.stopPropagation(); speak(word.textContent.trim()); });
+                });
+            }
+            if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind); else bind();
+        })();<\/script>`;
+        const tooltipScript = `<script data-tappy-point-reader="v4">(function(){
+            let card = null;
+            let corpusPromise = null;
+            function textOf(element){ return (element.innerText || element.textContent || '').replace(/\\s+/g, ' ').trim(); }
+            async function findInfo(word){
+                if(!corpusPromise){
+                    corpusPromise = window.parent.tappyReadCorpus || Promise.resolve({});
+                }
+                const corpus = await corpusPromise;
+                const key = textOf(word).toLowerCase();
+                const entry = corpus[key];
+                let current = word.parentElement, row = null;
+                for(let level = 0; current && level < 6; level++, current = current.parentElement){
+                    const text = textOf(current);
+                    if(text.length >= word.textContent.trim().length && text.length <= 220 && current.children.length >= 2){ row = current; break; }
+                }
+                const rowText = row ? textOf(row) : word.textContent.trim();
+                const phonetic = entry?.ph || '暂无音标';
+                const pos = rowText.match(/\\b(?:n|v|adj|adv|pron|prep|conj|art|aux|num|det|phr)\\.?\\b/i)?.[0] || '暂无词性';
+                const meaning = entry?.zh || '暂无中文释义';
+                return { phonetic, pos, meaning };
+            }
+            async function show(event, word){
+                if(!card){
+                    card = document.createElement('div');
+                    card.className = 'tappy-word-card';
+                    document.body.appendChild(card);
+                }
+                const info = await findInfo(word);
+                card.innerHTML = '';
+                const title = document.createElement('strong'); title.textContent = word.textContent.trim(); card.appendChild(title);
+                const phonetic = document.createElement('span'); phonetic.textContent = info.phonetic; card.appendChild(phonetic);
+                const pos = document.createElement('b'); pos.textContent = info.pos; card.appendChild(pos);
+                const meaning = document.createElement('span'); meaning.textContent = info.meaning; card.appendChild(meaning);
+                card.style.left = Math.min(Math.max(8, event.clientX - 70), innerWidth - 190) + 'px';
+                card.style.top = Math.max(8, event.clientY - 92) + 'px';
+                card.classList.add('visible');
+            }
+            function hide(){ if(card) card.classList.remove('visible'); }
+            function bind(){
+                if(!document.getElementById('tappy-word-card-style')){
+                    const style = document.createElement('style');
+                    style.id = 'tappy-word-card-style';
+                    style.textContent = '.tappy-word-card{position:fixed;z-index:9999;display:flex;flex-direction:column;gap:2px;min-width:180px;max-width:240px;padding:10px 14px;border:3px solid #26296b;border-radius:16px;background:#fff8dc;color:#26296b;box-shadow:4px 5px 0 #f07855,0 8px 18px rgba(38,41,107,.22);font-family:Arial,sans-serif;opacity:0;transform:translateY(5px) scale(.94);pointer-events:none;transition:opacity .15s,transform .15s}.tappy-word-card.visible{opacity:1;transform:translateY(0) scale(1)}.tappy-word-card strong{font-size:20px;color:#e45d3f}.tappy-word-card span{font-size:14px}.tappy-word-card b{align-self:flex-start;padding:2px 8px;border-radius:999px;background:#bcebd5;color:#23734b;font-size:12px}';
+                    document.head.appendChild(style);
+                }
+                document.querySelectorAll('.tappy-word').forEach(word => {
+                    if(word.dataset.tappyTooltipBound) return;
+                    word.dataset.tappyTooltipBound = '1';
+                    word.addEventListener('mouseenter', event => show(event, word));
+                    word.addEventListener('mousemove', event => show(event, word));
+                    word.addEventListener('mouseleave', hide);
+                });
+            }
+            if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind); else bind();
+        })();<\/script>`;
+        if (html.includes('data-tappy-point-reader="v4"')) return html;
+        html = html.replace(/<script data-tappy-point-reader="v[23]">[\s\S]*?<\/script>/gi, '');
+        return html.replace(/<\/body>/i, fallbackScript + tooltipScript + '</body>');
+    }
+
+    window.addEventListener('message', (event) => {
+        if (!event.data || event.data.type !== 'tappyread-word' || !event.data.text) return;
+        const frame = Array.from(document.querySelectorAll('.html-page-box iframe'))
+            .find(item => item.contentWindow === event.source);
+        if (!frame) return;
+        const speaker = frame.closest('.page-panel')?.querySelector('.mini-speaker');
+        if (speaker) {
+            speaker.classList.add('speaking');
+            setTimeout(() => speaker.classList.remove('speaking'), 900);
+        }
+    });
+
     /* =====================================================================
        Tree rendering
        ===================================================================== */
@@ -3076,6 +3204,41 @@
             msg.className = 'empty-msg';
             msg.textContent = '🌙 The End';
             panel.appendChild(msg);
+            return panel;
+        }
+
+        if (page.html) {
+            const htmlBox = document.createElement('div');
+            htmlBox.className = 'page-img-box html-page-box';
+            const frame = document.createElement('iframe');
+            frame.title = page.text || ('第 ' + (globalIndex + 1) + ' 页');
+            frame.setAttribute('sandbox', 'allow-scripts');
+            frame.srcdoc = ensureHtmlPointReader(page.html);
+            htmlBox.appendChild(frame);
+            htmlBox.addEventListener('click', (e)=>{
+                spawnRipple(e, htmlBox);
+                speakOne(page.text || 'This page has no words.');
+            });
+            panel.appendChild(htmlBox);
+
+            const htmlCaptionBar = document.createElement('div');
+            htmlCaptionBar.className = 'page-caption-bar';
+            const htmlSpeaker = document.createElement('div');
+            htmlSpeaker.className = 'mini-speaker';
+            htmlSpeaker.textContent = '🔊';
+            htmlCaptionBar.appendChild(htmlSpeaker);
+            const htmlCaptionText = document.createElement('div');
+            htmlCaptionText.className = 'caption-text';
+            htmlCaptionBar.appendChild(htmlCaptionText);
+            fillCaption(htmlCaptionText, page.text);
+            htmlSpeaker.addEventListener('click', ()=> speakOne(page.text || 'This page has no words.', htmlSpeaker));
+            const htmlEditBtn = document.createElement('div');
+            htmlEditBtn.className = 'mini-edit-btn';
+            htmlEditBtn.textContent = '✏️';
+            htmlEditBtn.title = '编辑本页朗读文字';
+            htmlEditBtn.addEventListener('click', ()=> startEditPageText(page, htmlCaptionBar, htmlCaptionText, htmlEditBtn));
+            htmlCaptionBar.appendChild(htmlEditBtn);
+            panel.appendChild(htmlCaptionBar);
             return panel;
         }
 
@@ -4098,6 +4261,7 @@
     const batchStoryList = document.getElementById('batchStoryList');
     const batchPreviewCount = document.getElementById('batchPreviewCount');
     const batchPreviewHint = document.getElementById('batchPreviewHint');
+    const batchPreviewTitle = document.getElementById('batchPreviewTitle');
 
     const batchProgressOverlay = document.getElementById('batchProgressOverlay');
     const batchProgressBox = document.getElementById('batchProgressBox');
@@ -4109,14 +4273,199 @@
     const progressFill = document.getElementById('progressFill');
     const totalStoriesEl = document.getElementById('totalStories');
     const totalImagesEl = document.getElementById('totalImages');
+    const totalItemsLabel = document.getElementById('totalItemsLabel');
     const processedCountEl = document.getElementById('processedCount');
     const progressLog = document.getElementById('progressLog');
 
     let batchCancelFlag = false;
     let batchRunning = false;
     let batchGroups = [];
+    let batchMode = 'image';
     let importCompleted = false;
     let importedFolderId = null;
+
+    function normalizeHtmlStoryName(fileName) {
+        return fileName.replace(/\.html?$/i, '')
+            .replace(/(?:[ _-]*(?:page|p|第)?[ _-]*\d+)$/i, '')
+            .replace(/[ _-]+$/, '').trim() || '未命名绘本';
+    }
+
+    function htmlPageNumber(fileName) {
+        const match = fileName.match(/(?:page|p|第)?[ _-]*(\d+)(?:\.html?)$/i);
+        return match ? parseInt(match[1], 10) : 0;
+    }
+
+    function readFileText(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result || ''));
+            reader.onerror = () => reject(reader.error || new Error('读取文件失败'));
+            reader.readAsText(file);
+        });
+    }
+
+    function sanitizeHtmlPage(node, sourceHtml) {
+        const cleanNode = node.cloneNode(true);
+        cleanNode.querySelectorAll('script, noscript, form, input, button').forEach(el => el.remove());
+        const doc = new DOMParser().parseFromString(sourceHtml, 'text/html');
+        const styles = Array.from(doc.querySelectorAll('style')).map(el => el.outerHTML).join('');
+        return '<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;width:100%;height:100%;overflow:hidden}body{display:flex;align-items:center;justify-content:center;font-family:Arial,sans-serif}img{max-width:100%;max-height:100%;object-fit:contain}' + styles + '</style></head><body>' + cleanNode.outerHTML + '</body></html>';
+    }
+
+    function htmlPageShell(content, sourceHtml) {
+        const doc = new DOMParser().parseFromString(sourceHtml, 'text/html');
+        const styles = Array.from(doc.querySelectorAll('style')).map(el => el.outerHTML).join('');
+        const readerScript = `<script>(function(){
+            const ignored = new Set(['SCRIPT','STYLE','NOSCRIPT','TEXTAREA','INPUT','BUTTON']);
+            let active = null;
+            function notify(text, target){
+                if(active) active.classList.remove('tappy-word-active');
+                active = target;
+                active.classList.add('tappy-word-active');
+                parent.postMessage({type:'tappyread-word', text:text}, '*');
+            }
+            function wrapText(node){
+                if(!node.nodeValue || !node.nodeValue.trim() || ignored.has(node.parentElement?.tagName)) return;
+                const fragment = document.createDocumentFragment();
+                const pieces = node.nodeValue.split(/([A-Za-z]+(?:['-][A-Za-z]+)*)/g);
+                pieces.forEach(piece => {
+                    if(/^[A-Za-z]+(?:['-][A-Za-z]+)*$/.test(piece)){
+                        const word = document.createElement('span');
+                        word.className = 'tappy-word';
+                        word.textContent = piece;
+                        word.addEventListener('click', event => { event.stopPropagation(); notify(piece, word); });
+                        fragment.appendChild(word);
+                    } else fragment.appendChild(document.createTextNode(piece));
+                });
+                node.parentNode.replaceChild(fragment, node);
+            }
+            function init(){
+                const style = document.createElement('style');
+                style.textContent = '.tappy-word{cursor:pointer;border-radius:4px;padding:0 1px;transition:background .12s,color .12s}.tappy-word:hover{background:#bde7f6}.tappy-word-active{background:#f07855!important;color:#fff!important;box-shadow:0 1px 0 rgba(38,41,107,.35)}';
+                document.head.appendChild(style);
+                const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+                const nodes = []; let node;
+                while(node = walker.nextNode()) nodes.push(node);
+                nodes.forEach(wrapText);
+            }
+            if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+        })();<\/script>`;
+        return '<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;width:100%;height:100%;overflow:hidden}body{box-sizing:border-box;padding:24px;font-family:Arial,sans-serif;line-height:1.5}img{max-width:100%;height:auto;object-fit:contain}' + styles + '</style></head><body>' + content + readerScript + '</body></html>';
+    }
+
+    async function paginateHtmlNode(node, sourceHtml) {
+        const cleanNode = node.cloneNode(true);
+        cleanNode.querySelectorAll('script, noscript, form, input, button').forEach(el => el.remove());
+        const readerBox = document.querySelector('.page-img-box');
+        const targetWidth = Math.max(320, readerBox?.clientWidth || 800);
+        const targetHeight = Math.max(320, readerBox?.clientHeight || 600);
+        const measureFrame = document.createElement('iframe');
+        measureFrame.style.cssText = `position:fixed;left:-10000px;top:0;width:${targetWidth}px;height:${targetHeight}px;border:0;visibility:hidden;`;
+        document.body.appendChild(measureFrame);
+        measureFrame.srcdoc = htmlPageShell('', sourceHtml);
+        await new Promise(resolve => { measureFrame.onload = resolve; setTimeout(resolve, 100); });
+        const measureDocument = measureFrame.contentDocument;
+        const measureBody = measureDocument.body;
+        const fits = async (content) => {
+            measureBody.innerHTML = content;
+            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+            return measureBody.scrollHeight <= measureFrame.clientHeight;
+        };
+        const serializeNode = (element) => element.tagName === 'BODY' ? element.innerHTML : element.outerHTML;
+        const wrapContent = (items) => {
+            const wrapper = cleanNode.cloneNode(false);
+            items.forEach(item => wrapper.appendChild(item.cloneNode(true)));
+            return serializeNode(wrapper);
+        };
+        const splitText = async (textNode) => {
+            const words = textNode.textContent.split(/(\s+)/);
+            const parts = [];
+            let current = '';
+            for (const word of words) {
+                const candidate = current + word;
+                if (current && !(await fits(wrapContent([Object.assign(document.createTextNode(candidate), {})])))) {
+                    parts.push(current);
+                    current = word;
+                } else {
+                    current = candidate;
+                }
+            }
+            if (current.trim()) parts.push(current);
+            return parts.map(text => {
+                const wrapper = cleanNode.cloneNode(false);
+                wrapper.textContent = text;
+                return serializeNode(wrapper);
+            });
+        };
+        const chunks = [];
+        let currentItems = [];
+        const flush = () => {
+            if (currentItems.length) {
+                chunks.push(wrapContent(currentItems));
+                currentItems = [];
+            }
+        };
+        for (const child of Array.from(cleanNode.childNodes)) {
+            if (child.nodeType === Node.TEXT_NODE && !child.textContent.trim()) continue;
+            const candidateItems = currentItems.concat(child);
+            if (await fits(wrapContent(candidateItems))) {
+                currentItems.push(child);
+                continue;
+            }
+            flush();
+            if (child.nodeType === Node.TEXT_NODE) {
+                const textParts = await splitText(child);
+                chunks.push(...textParts);
+            } else if (child.nodeType === Node.ELEMENT_NODE && child.childNodes.length > 0) {
+                const childChunks = await paginateHtmlNode(child, sourceHtml);
+                chunks.push(...childChunks);
+            } else {
+                currentItems.push(child);
+            }
+        }
+        flush();
+        measureFrame.remove();
+        return chunks.length ? chunks : [serializeNode(cleanNode)];
+    }
+
+    async function analyzeHtmlFiles(files, onProgress) {
+        const htmlFiles = Array.from(files).filter(file => /\.html?$/i.test(file.name));
+        const groupsByName = new Map();
+        for (let fileIndex = 0; fileIndex < htmlFiles.length; fileIndex++) {
+            const file = htmlFiles[fileIndex];
+            onProgress?.(fileIndex, htmlFiles.length, file.name, '正在读取');
+            const source = await readFileText(file);
+            const doc = new DOMParser().parseFromString(source, 'text/html');
+            let pageNodes = Array.from(doc.querySelectorAll('[data-page], .page, section'));
+            if (pageNodes.length === 0) pageNodes = [doc.body || doc.documentElement];
+            const storyName = normalizeHtmlStoryName(file.name);
+            if (!groupsByName.has(storyName)) groupsByName.set(storyName, { name: storyName, pages: [], sortKey: htmlPageNumber(file.name) || Infinity });
+            const group = groupsByName.get(storyName);
+            for (let index = 0; index < pageNodes.length; index++) {
+                const node = pageNodes[index];
+                onProgress?.(fileIndex, htmlFiles.length, file.name, `正在分页（${index + 1}/${pageNodes.length}）`);
+                const htmlChunks = await paginateHtmlNode(node, source);
+                const contentChunks = htmlChunks.filter(html => {
+                    const chunkDoc = new DOMParser().parseFromString(html, 'text/html');
+                    return (chunkDoc.body?.textContent || '').trim() || chunkDoc.body?.querySelector('img,svg,canvas');
+                });
+                contentChunks.forEach((html, chunkIndex) => {
+                    const textDoc = new DOMParser().parseFromString(html, 'text/html');
+                    const text = (textDoc.body?.textContent || '').replace(/\s+/g, ' ').trim();
+                    group.pages.push({ file, pageNumber: htmlPageNumber(file.name) || index + 1, order: index * 10000 + chunkIndex, text, html: htmlPageShell(html, source) });
+                });
+            }
+            onProgress?.(fileIndex + 1, htmlFiles.length, file.name, '分析完成');
+        }
+        const groups = Array.from(groupsByName.values()).filter(group => group.pages.length > 0);
+        groups.forEach(group => {
+            group.pages.sort((a, b) => a.pageNumber - b.pageNumber || a.order - b.order || a.file.name.localeCompare(b.file.name));
+            group.status = 'pending';
+            group.displayName = group.name;
+        });
+        groups.sort((a, b) => a.sortKey - b.sortKey || a.name.localeCompare(b.name));
+        return groups;
+    }
 
     function renderBatchPreview(groups) {
         batchStoryList.innerHTML = '';
@@ -4133,6 +4482,14 @@
             pagesSpan.className = 'b-pages';
             pagesSpan.textContent = `${group.pages.length} 页`;
 
+            if (batchMode === 'html') {
+                const previewSpan = document.createElement('span');
+                previewSpan.className = 'b-preview';
+                previewSpan.textContent = group.pages[0]?.text || '（无文字）';
+                previewSpan.title = previewSpan.textContent;
+                item.appendChild(previewSpan);
+            }
+
             const statusSpan = document.createElement('span');
             statusSpan.className = 'b-status pending';
             statusSpan.textContent = '待导入';
@@ -4145,13 +4502,16 @@
 
         batchPreviewCount.textContent = groups.length;
         batchPreviewHint.textContent = groups.length > 0 ?
-            `请确认以上 ${groups.length} 个绘本信息无误后，点击「确认导入」开始导入。` :
+            `请确认以上 ${groups.length} 个绘本信息无误后，点击「确认${batchMode === 'html' ? '生成' : '导入'}」开始操作。` :
             '未识别到任何绘本，请检查文件名格式（如 "01绘本名-01.jpg" 或 "绘本名 1.jpg"）';
+        confirmBatchBtn.textContent = batchMode === 'html' ? '✅ 确认生成' : '✅ 确认导入';
         confirmBatchBtn.disabled = groups.length === 0;
     }
 
-    function showBatchPreview(groups) {
+    function showBatchPreview(groups, mode = 'image') {
         batchGroups = groups;
+        batchMode = mode;
+        batchPreviewTitle.textContent = mode === 'html' ? '⚡ HTML 一键生成 - 预览' : '📦 批量导入绘本 - 预览';
         renderBatchPreview(groups);
         batchPreviewOverlay.classList.add('open');
     }
@@ -4259,6 +4619,7 @@
         progressFill.classList.remove('complete');
         progressLog.innerHTML = '';
         const totalImages = groups.reduce((sum, g) => sum + g.pages.length, 0);
+        totalItemsLabel.textContent = '总图片';
         totalStoriesEl.textContent = groups.length;
         totalImagesEl.textContent = totalImages;
         processedCountEl.textContent = '0';
@@ -4496,6 +4857,157 @@
         }
     }
 
+    async function executeHtmlImport(groups) {
+        if (batchRunning) return;
+        batchRunning = true;
+        batchCancelFlag = false;
+        importCompleted = false;
+        progressFill.style.width = '0%';
+        progressFill.classList.remove('complete');
+        progressLog.innerHTML = '';
+        const totalPages = groups.reduce((sum, group) => sum + group.pages.length, 0);
+        totalItemsLabel.textContent = '总页面';
+        totalStoriesEl.textContent = groups.length;
+        totalImagesEl.textContent = totalPages;
+        processedCountEl.textContent = '0';
+        batchProgressTitle.textContent = '⚡ 一键生成中...';
+        batchProgressOverlay.classList.add('open');
+        const targetParent = selectedFolderId ? findNodeById(library, selectedFolderId) : null;
+        const parentNodes = targetParent ? targetParent.children : library;
+        const statusElements = batchStoryList.querySelectorAll('.b-status');
+        let processed = 0;
+        let successCount = 0;
+        const generatedStoryIds = [];
+
+        try {
+            for (let gIdx = 0; gIdx < groups.length; gIdx++) {
+                if (batchCancelFlag) break;
+                const group = groups[gIdx];
+                if (statusElements[gIdx]) {
+                    statusElements[gIdx].className = 'b-status importing';
+                    statusElements[gIdx].textContent = '生成中...';
+                }
+                logProgress(`📖 正在生成绘本: "${group.displayName}" (${group.pages.length} 页)`);
+                if (hasDuplicateName(parentNodes, group.name)) {
+                    logProgress(`⚠️ 绘本 "${group.name}" 已存在于目标位置，跳过`);
+                    if (statusElements[gIdx]) {
+                        statusElements[gIdx].className = 'b-status failed';
+                        statusElements[gIdx].textContent = '❌ 已存在';
+                    }
+                    processed += group.pages.length;
+                    continue;
+                }
+                const story = { id: genId(), type: 'story', title: group.name, builtin: false, pages: [], sortKey: Infinity };
+                group.pages.forEach(page => {
+                    story.pages.push({ file: page.file.name, text: page.text, html: page.html });
+                    processed++;
+                    logProgress(`  ✅ 第 ${story.pages.length} 页: ${page.file.name}${page.text ? ' → "' + page.text.substring(0, 30) + (page.text.length > 30 ? '...' : '') + '"' : '（无文字）'}`);
+                });
+                if (story.pages.length > 0) {
+                    parentNodes.push(story);
+                    generatedStoryIds.push(story.id);
+                    successCount++;
+                    if (statusElements[gIdx]) {
+                        statusElements[gIdx].className = 'b-status success';
+                        statusElements[gIdx].textContent = '✅ 生成成功';
+                    }
+                }
+                progressFill.style.width = (totalPages ? Math.round(processed / totalPages * 100) : 100) + '%';
+                processedCountEl.textContent = processed;
+            }
+            sortNodes(parentNodes);
+            saveLibrary();
+            if (generatedStoryIds.length > 0) {
+                currentStoryId = generatedStoryIds[generatedStoryIds.length - 1];
+                currentSpread = 0;
+                localStorage.setItem('wib:currentStoryId', currentStoryId);
+                renderAll(false);
+            }
+            if (batchCancelFlag) {
+                logProgress('⏹️ 生成已取消，部分绘本可能已生成');
+                batchProgressTitle.textContent = '⏹️ 生成已取消';
+                batchProgressHeader.style.background = 'var(--danger)';
+            } else {
+                logProgress(`🎉 一键生成完成！成功生成 ${successCount} 个绘本`);
+                batchProgressTitle.textContent = '✅ 一键生成完成！';
+                batchProgressHeader.style.background = 'var(--leaf)';
+                importCompleted = true;
+                progressFill.classList.add('complete');
+            }
+            batchProgressActions.innerHTML = '';
+            const closeBtn = document.createElement('button');
+            closeBtn.className = 'btn success';
+            closeBtn.textContent = '关闭';
+            closeBtn.onclick = () => { batchProgressOverlay.classList.remove('open'); resetImportState(); };
+            batchProgressActions.appendChild(closeBtn);
+            closeBatchProgressBtn.onclick = closeBtn.onclick;
+            closeBatchPreview();
+        } catch (error) {
+            logProgress(`❌ 生成出错: ${error.message}`);
+            batchProgressTitle.textContent = '❌ 生成出错';
+            batchProgressHeader.style.background = 'var(--danger)';
+        } finally {
+            batchRunning = false;
+        }
+    }
+
+    function openHtmlGeneratePicker() {
+        if (batchRunning) {
+            alert('批量操作正在进行中，请等待完成');
+            return;
+        }
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.multiple = true;
+        input.accept = '.html,.htm,text/html';
+        input.style.display = 'none';
+        document.body.appendChild(input);
+        input.addEventListener('change', async (event) => {
+            try {
+                if (!event.target.files?.length) return;
+                const totalFiles = Array.from(event.target.files).filter(file => /\.html?$/i.test(file.name)).length;
+                batchRunning = true;
+                batchCancelFlag = false;
+                batchProgressOverlay.classList.add('open');
+                batchProgressTitle.textContent = '⚡ 正在分析 HTML...';
+                batchProgressHeader.style.background = '';
+                progressFill.classList.remove('complete');
+                progressFill.style.width = '0%';
+                totalStoriesEl.textContent = '待识别';
+                totalImagesEl.textContent = totalFiles;
+                    totalItemsLabel.textContent = '总文件';
+                processedCountEl.textContent = '0';
+                progressLog.innerHTML = '';
+                batchProgressActions.innerHTML = '';
+                closeBatchProgressBtn.style.display = 'block';
+                closeBatchProgressBtn.onclick = () => {
+                    if (batchRunning) {
+                        batchCancelFlag = true;
+                        logProgress('⏹️ 正在取消 HTML 分析...');
+                    }
+                };
+                const groups = await analyzeHtmlFiles(event.target.files, (completed, total, fileName, stage) => {
+                    if (batchCancelFlag) throw new Error('HTML 分析已取消');
+                    const inProgress = stage.indexOf('分页') >= 0 ? 0.5 : 0;
+                    progressFill.style.width = (total ? Math.round((completed + inProgress) / total * 100) : 100) + '%';
+                    processedCountEl.textContent = completed;
+                    logProgress(`${stage}：${fileName}`);
+                });
+                batchProgressOverlay.classList.remove('open');
+                batchRunning = false;
+                if (groups.length > 0) showBatchPreview(groups, 'html');
+                else alert('未找到可生成的 HTML 页面');
+            } catch (error) {
+                batchProgressOverlay.classList.remove('open');
+                batchRunning = false;
+                if (error.message !== 'HTML 分析已取消') alert('HTML 文件读取失败：' + error.message);
+            } finally {
+                input.remove();
+            }
+        });
+        input.click();
+    }
+
     batchImportBtn.addEventListener('click', () => {
         if (batchRunning) {
             alert('批量导入正在进行中，请等待完成');
@@ -4513,7 +5025,7 @@
             if (e.target.files && e.target.files.length > 0) {
                 const groups = analyzeFiles(e.target.files);
                 if (groups && groups.length > 0) {
-                    showBatchPreview(groups);
+                    showBatchPreview(groups, 'image');
                 } else {
                     alert('未能识别出任何绘本，请确保文件名格式正确（如 "01绘本名-01.jpg" 或 "绘本名 1.jpg"）');
                 }
@@ -4523,10 +5035,14 @@
         input.click();
     });
 
+    htmlGenerateBtn.addEventListener('click', openHtmlGeneratePicker);
+
     confirmBatchBtn.addEventListener('click', () => {
         if (batchGroups.length === 0) return;
         batchPreviewOverlay.classList.remove('open');
-        executeBatchImport(batchGroups);
+        const groups = batchGroups;
+        if (batchMode === 'html') executeHtmlImport(groups);
+        else executeBatchImport(groups);
     });
 
     cancelBatchPreviewBtn.addEventListener('click', closeBatchPreview);
