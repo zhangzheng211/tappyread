@@ -1077,8 +1077,21 @@
             .help-content .shortcut-grid{ grid-template-columns:1fr; }
         }
     </style>
+    <style>
+        .account-menu{position:fixed;right:18px;top:76px;z-index:10000}
+        .account-avatar{width:38px;height:38px;border:2px solid #26296b;border-radius:50%;background:#fff8dc;cursor:pointer;font-size:20px;box-shadow:2px 3px 0 #f07855}
+        .account-popover{display:none;position:absolute;right:0;top:46px;min-width:150px;padding:10px;background:#fff8dc;border:2px solid #26296b;border-radius:10px;box-shadow:3px 4px 0 #f07855;color:#26296b}
+        .account-menu:hover .account-popover,.account-menu:focus-within .account-popover{display:flex;flex-direction:column;gap:8px}
+        .account-popover button{border:0;border-radius:6px;padding:6px;background:#f07855;color:#fff;cursor:pointer}
+        @media (max-width:860px){.account-menu{top:112px;right:14px}}
+    </style>
 </head>
 <body>
+
+<div class="account-menu" id="accountMenu">
+    <button class="account-avatar" id="accountAvatar" title="账户信息">👤</button>
+    <div class="account-popover" id="accountPopover"><strong id="accountName">当前用户</strong><button id="logoutBtn">退出登录</button></div>
+</div>
 
 <svg class="silhouette sil-dog" viewBox="0 0 200 140" xmlns="http://www.w3.org/2000/svg" fill="#26296B">
     <path d="M20 120 Q10 100 25 90 Q15 70 35 60 Q30 40 55 35 Q60 15 85 20 Q100 5 115 20 Q135 15 140 35 Q160 40 155 60 Q175 65 165 85 Q180 95 165 110 Q170 125 150 125 Q140 135 120 125 Q100 132 80 122 Q60 132 40 122 Q25 130 20 120 Z"/>
@@ -2785,7 +2798,7 @@
             }
             if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind); else bind();
         })();<\/script>`;
-        const tooltipScript = `<script data-tappy-point-reader="v5">(function(){
+        const tooltipScript = `<script data-tappy-point-reader="v6">(function(){
             let card = null;
             let requestId = 0;
             const pendingRequests = new Map();
@@ -2821,8 +2834,15 @@
                 const title = document.createElement('strong'); title.textContent = word.textContent.trim(); card.appendChild(title);
                 const phonetic = document.createElement('span'); phonetic.textContent = info.phonetic; card.appendChild(phonetic);
                 const meaning = document.createElement('span'); meaning.textContent = info.meaning; card.appendChild(meaning);
-                card.style.left = Math.min(Math.max(8, event.clientX - 70), innerWidth - 190) + 'px';
-                card.style.top = Math.max(8, event.clientY - 92) + 'px';
+                const gap = 12;
+                const maxLeft = Math.max(8, innerWidth - card.offsetWidth - 8);
+                const left = Math.min(Math.max(8, event.clientX - card.offsetWidth / 2), maxLeft);
+                const belowTop = event.clientY + gap;
+                const top = belowTop + card.offsetHeight <= innerHeight - 8
+                    ? belowTop
+                    : Math.max(8, event.clientY - card.offsetHeight - gap);
+                card.style.left = left + 'px';
+                card.style.top = top + 'px';
                 card.classList.add('visible');
             }
             function hide(){ if(card) card.classList.remove('visible'); }
@@ -2843,8 +2863,8 @@
             }
             if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind); else bind();
         })();<\/script>`;
-        if (html.includes('data-tappy-point-reader="v5"')) return html;
-        html = html.replace(/<script data-tappy-point-reader="v[2-4]">[\s\S]*?<\/script>/gi, '');
+        if (html.includes('data-tappy-point-reader="v6"')) return html;
+        html = html.replace(/<script data-tappy-point-reader="v[2-5]">[\s\S]*?<\/script>/gi, '');
         return html.replace(/<\/body>/i, fallbackScript + tooltipScript + '</body>');
     }
 
@@ -5458,6 +5478,19 @@
     }
 
     renderAll(true);
+</script>
+<script>
+    (() => {
+        const username = localStorage.getItem('tappyread_last_user') || '当前用户';
+        document.getElementById('accountName').textContent = username;
+        document.getElementById('logoutBtn').addEventListener('click', async () => {
+            const token = localStorage.getItem('tappyread_auth_token');
+            try { await fetch('/api/auth/logout', { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, credentials: 'include' }); } catch (error) {}
+            localStorage.removeItem('tappyread_auth_token');
+            localStorage.removeItem('tappyread_last_user');
+            window.location.href = 'index.html';
+        });
+    })();
 </script>
 </body>
 </html>
