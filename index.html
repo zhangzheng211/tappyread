@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
+
     <!-- 标签栏图标 -->
     <link rel="icon" href="logo.png" type="image/png">
     <!-- 设置浏览器标签图标 -->
@@ -370,7 +371,8 @@
             const rememberUser = document.getElementById('rememberUser');
             const btnText = loginBtn.querySelector('.btn-text');
             const REDIRECT_URL = 'showfirst.html';
-            const USER_FILE = './user';
+            const API_BASE = '/api';
+            const AUTH_TOKEN_KEY = 'tappyread_auth_token';
             let isSubmitting = false;
 
             function setInputError(input, hasError) {
@@ -384,46 +386,6 @@
                 errorMsg.style.color = isSuccess ? '#2A7A4A' : '#C0392B';
                 errorMsg.style.background = isSuccess ? 'rgba(62, 142, 90, 0.08)' : 'rgba(192, 57, 43, 0.06)';
                 errorMsg.style.borderColor = isSuccess ? 'rgba(62, 142, 90, 0.20)' : 'rgba(192, 57, 43, 0.10)';
-            }
-
-            function parseCsvRow(line) {
-                return line.replace(/^\uFEFF/, '').split(',').map(part => part.trim().replace(/^"|"$/g, ''));
-            }
-
-            async function loadUserCredentials() {
-                try {
-                    const response = await fetch(new URL(USER_FILE, document.baseURI), {
-                        cache: 'no-store',
-                        credentials: 'same-origin'
-                    });
-                    if (!response.ok) {
-                        throw new Error('user file not found');
-                    }
-                    const text = await response.text();
-                    const rows = text.split(/\r?\n/).map(row => row.trim()).filter(Boolean);
-                    if (rows.length < 2) {
-                        return [];
-                    }
-                    const headers = parseCsvRow(rows[0]).map(header => header.toLowerCase());
-                    const usernameIndex = headers.indexOf('username');
-                    const passwordIndex = headers.indexOf('password');
-                    if (usernameIndex >= 0 && passwordIndex >= 0) {
-                        return rows.slice(1).map(row => {
-                            const values = parseCsvRow(row);
-                            return {
-                                username: values[usernameIndex] || '',
-                                password: values[passwordIndex] || ''
-                            };
-                        }).filter(item => item.username && item.password);
-                    }
-                    return rows.map(parseCsvRow).filter(values => values.length >= 2).map(values => ({
-                        username: values[0],
-                        password: values[1]
-                    })).filter(item => item.username && item.password && item.username !== 'username');
-                } catch (error) {
-                    console.warn('Failed to load user file:', error);
-                    return [];
-                }
             }
 
             function redirectToMainPage() {
@@ -458,21 +420,33 @@
                 loginBtn.classList.add('is-loading');
                 btnText.textContent = '登录中...';
 
-                const accounts = await loadUserCredentials();
-                const matched = accounts.some(item => item.username === username && item.password === password);
+                let loginResponse;
+                try {
+                    loginResponse = await fetch(`${API_BASE}/auth/login`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'include',
+                        body: JSON.stringify({ username, password })
+                    });
+                } catch (error) {
+                    loginResponse = null;
+                }
 
-                if (!matched) {
+                if (!loginResponse || !loginResponse.ok) {
                     loginBtn.classList.remove('is-loading');
                     loginBtn.disabled = false;
                     btnText.textContent = '🔓 登 录';
                     isSubmitting = false;
                     setInputError(usernameInput, true);
                     setInputError(passwordInput, true);
-                    setError('❌ 用户名或密码错误，请重试');
+                    setError(loginResponse ? (await loginResponse.json()).error : '❌ 无法连接服务器');
                     passwordInput.focus();
                     passwordInput.select();
                     return;
                 }
+
+                const loginData = await loginResponse.json();
+                localStorage.setItem(AUTH_TOKEN_KEY, loginData.token);
 
                 if (rememberUser.checked) {
                     localStorage.setItem('tappyread_last_user', username);

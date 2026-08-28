@@ -1608,6 +1608,8 @@
     const LS_FOLDER_KEY = 'wib:selectedFolder';
     const LS_WHITELIST_KEY = 'wib:whitelist';
     const LS_COLLAPSED_KEY = 'wib:collapsed_v2';
+    const API_BASE = '/api';
+    const AUTH_TOKEN_KEY = 'tappyread_auth_token';
 
     function loadOxfordCorpus() {
         return fetch('oxford_corpus_complete.json', { cache: 'no-store' })
@@ -1896,6 +1898,20 @@
             if(selectedFolderId) localStorage.setItem(LS_FOLDER_KEY, selectedFolderId);
             else localStorage.removeItem(LS_FOLDER_KEY);
             localStorage.setItem(LS_COLLAPSED_KEY, JSON.stringify([...collapsedNodes]));
+            const token = localStorage.getItem(AUTH_TOKEN_KEY);
+            if(token){
+                fetch(`${API_BASE}/library`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                    credentials: 'include',
+                    body: JSON.stringify({
+                        tree: library,
+                        collapsed: [...collapsedNodes],
+                        selectedFolderId,
+                        currentStoryId
+                    })
+                }).catch(error => console.warn('同步绘本目录失败', error));
+            }
         }catch(err){ console.warn('缓存失败', err); }
     }
 
@@ -1934,7 +1950,6 @@
     } else {
         library = [];
         collapsedNodes = new Set();
-        saveLibrary();
     }
 
     const savedFolderId = localStorage.getItem(LS_FOLDER_KEY);
@@ -1958,6 +1973,37 @@
             currentStoryId = allStories[0].id;
         }
     }
+
+    async function loadRemoteLibrary(){
+        const token = localStorage.getItem(AUTH_TOKEN_KEY);
+        if(!token) return;
+        try{
+            const response = await fetch(`${API_BASE}/library`, {
+                headers: { Authorization: `Bearer ${token}` },
+                credentials: 'include'
+            });
+            if(response.status === 401){
+                localStorage.removeItem(AUTH_TOKEN_KEY);
+                return;
+            }
+            if(!response.ok) throw new Error(`目录加载失败: ${response.status}`);
+            const data = await response.json();
+            if(!Array.isArray(data.tree) || !data.tree.length){
+                if(library.length) saveLibrary();
+                return;
+            }
+            library = data.tree;
+            collapsedNodes = new Set(Array.isArray(data.collapsed) ? data.collapsed : []);
+            selectedFolderId = data.selectedFolderId || null;
+            currentStoryId = data.currentStoryId || getAllStories(library)[0]?.id || null;
+            localStorage.setItem(LS_LIB_KEY, JSON.stringify({ tree: library, collapsed: [...collapsedNodes] }));
+            renderTree();
+            renderAll(false);
+        }catch(error){
+            console.warn('加载账号绘本目录失败，继续使用本地缓存', error);
+        }
+    }
+    loadRemoteLibrary();
 
     /* =====================================================================
        ===== 工具函数 =====
@@ -2751,13 +2797,11 @@
                     const text = textOf(current);
                     if(text.length >= word.textContent.trim().length && text.length <= 220 && current.children.length >= 2){ row = current; break; }
                 }
-                const rowText = row ? textOf(row) : word.textContent.trim();
-                const pos = rowText.match(/\\b(?:n|v|adj|adv|pron|prep|conj|art|aux|num|det|phr)\\.?\\b/i)?.[0] || '暂无词性';
                 return new Promise(resolve => {
                     const id = ++requestId;
                     const timeout = setTimeout(() => {
                         pendingRequests.delete(id);
-                        resolve({ phonetic: '暂无音标', pos, meaning: '暂无中文释义' });
+                        resolve({ phonetic: '暂无音标', meaning: '暂无中文释义' });
                     }, 2000);
                     pendingRequests.set(id, { pos, resolve, timeout });
                     window.parent.postMessage({ type: 'tappyread-word-info', text: key, requestId: id }, '*');
@@ -2769,7 +2813,7 @@
                 if(!request) return;
                 clearTimeout(request.timeout);
                 pendingRequests.delete(event.data.requestId);
-                request.resolve({ phonetic: event.data.phonetic || '暂无音标', pos: request.pos, meaning: event.data.meaning || '暂无中文释义' });
+                request.resolve({ phonetic: event.data.phonetic || '暂无音标', meaning: event.data.meaning || '暂无中文释义' });
             });
             async function show(event, word){
                 if(!card){
@@ -2781,7 +2825,6 @@
                 card.innerHTML = '';
                 const title = document.createElement('strong'); title.textContent = word.textContent.trim(); card.appendChild(title);
                 const phonetic = document.createElement('span'); phonetic.textContent = info.phonetic; card.appendChild(phonetic);
-                const pos = document.createElement('b'); pos.textContent = info.pos; card.appendChild(pos);
                 const meaning = document.createElement('span'); meaning.textContent = info.meaning; card.appendChild(meaning);
                 card.style.left = Math.min(Math.max(8, event.clientX - 70), innerWidth - 190) + 'px';
                 card.style.top = Math.max(8, event.clientY - 92) + 'px';
