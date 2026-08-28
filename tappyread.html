@@ -3585,9 +3585,9 @@
     }
 
     function renderAll(autoSpeak){
-        renderTree();
-        renderSpread(!!autoSpeak);
-        if(currentStoryId) localStorage.setItem('wib:currentStoryId', currentStoryId);
+    renderTree();
+    renderSpread(!!autoSpeak);
+    if(currentStoryId) localStorage.setItem('wib:currentStoryId', currentStoryId);
     }
 
     /* =====================================================================
@@ -5459,29 +5459,28 @@
     });
 
     /* =====================================================================
-       Init
-       ===================================================================== */
-    function ensureSortKeys(nodes) {
-        if(!nodes || !Array.isArray(nodes)) return;
-        nodes.forEach((node, index) => {
-            if (node.sortKey === undefined || node.sortKey === null) {
-                node.sortKey = index + 1;
-            }
-            if (node.type === 'folder' && node.children) {
-                ensureSortKeys(node.children);
-            }
-        });
-    }
-    ensureSortKeys(library);
-    sortNodes(library);
+   Init
+   ===================================================================== */
+// 初始化部分
+function ensureSortKeys(nodes) {
+    if(!nodes || !Array.isArray(nodes)) return;
+    nodes.forEach((node, index) => {
+        if (node.sortKey === undefined || node.sortKey === null) {
+            node.sortKey = index + 1;
+        }
+        if (node.type === 'folder' && node.children) {
+            ensureSortKeys(node.children);
+        }
+    });
+}
+ensureSortKeys(library);
+sortNodes(library);
 
-    const allStoriesFinal = getAllStories(library);
-    if (allStoriesFinal.length > 0 && !currentStoryId) {
-        currentStoryId = allStoriesFinal[0].id;
-        localStorage.setItem('wib:currentStoryId', currentStoryId);
-    }
+// 默认不选中任何绘本
+currentStoryId = null;
+localStorage.removeItem('wib:currentStoryId');
 
-    renderAll(true);
+renderAll(false); // 初始化不播放语音
 </script>
 <script>
     (() => {
