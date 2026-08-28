@@ -2792,18 +2792,13 @@
             function textOf(element){ return (element.innerText || element.textContent || '').replace(/\\s+/g, ' ').trim(); }
             function findInfo(word){
                 const key = textOf(word).toLowerCase();
-                let current = word.parentElement, row = null;
-                for(let level = 0; current && level < 6; level++, current = current.parentElement){
-                    const text = textOf(current);
-                    if(text.length >= word.textContent.trim().length && text.length <= 220 && current.children.length >= 2){ row = current; break; }
-                }
                 return new Promise(resolve => {
                     const id = ++requestId;
                     const timeout = setTimeout(() => {
                         pendingRequests.delete(id);
                         resolve({ phonetic: '暂无音标', meaning: '暂无中文释义' });
                     }, 2000);
-                    pendingRequests.set(id, { pos, resolve, timeout });
+                    pendingRequests.set(id, { resolve, timeout });
                     window.parent.postMessage({ type: 'tappyread-word-info', text: key, requestId: id }, '*');
                 });
             }
