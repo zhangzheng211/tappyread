@@ -169,3 +169,6 @@ app.get('/api/health', async (req, res) => {
 });
 
 app.listen(port, () => console.log(`TappyRead server listening on http://localhost:${port}`));
+ssl: {
+  rejectUnauthorized: true
+}
