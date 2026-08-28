@@ -432,20 +432,26 @@
                     loginResponse = null;
                 }
 
-                if (!loginResponse || !loginResponse.ok) {
+                let loginData = null;
+                try {
+                    loginData = loginResponse ? await loginResponse.json() : null;
+                } catch (error) {
+                    loginData = null;
+                }
+
+                if (!loginResponse || !loginResponse.ok || !loginData?.token) {
                     loginBtn.classList.remove('is-loading');
                     loginBtn.disabled = false;
                     btnText.textContent = '🔓 登 录';
                     isSubmitting = false;
                     setInputError(usernameInput, true);
                     setInputError(passwordInput, true);
-                    setError(loginResponse ? (await loginResponse.json()).error : '❌ 无法连接服务器');
+                    setError(loginData?.error || '❌ 登录服务不可用，请确认 Vercel API 已部署');
                     passwordInput.focus();
                     passwordInput.select();
                     return;
                 }
 
-                const loginData = await loginResponse.json();
                 localStorage.setItem(AUTH_TOKEN_KEY, loginData.token);
 
                 if (rememberUser.checked) {
