@@ -3300,6 +3300,10 @@
                 spawnRipple(e, htmlBox);
                 speakOne(page.text || 'This page has no words.');
             });
+            htmlBox.addEventListener('dblclick', (e)=>{
+                e.preventDefault();
+                toggleReaderFullscreen();
+            });
             panel.appendChild(htmlBox);
 
             const htmlCaptionBar = document.createElement('div');
