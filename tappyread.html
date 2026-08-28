@@ -2739,28 +2739,38 @@
             }
             if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind); else bind();
         })();<\/script>`;
-        const tooltipScript = `<script data-tappy-point-reader="v4">(function(){
+        const tooltipScript = `<script data-tappy-point-reader="v5">(function(){
             let card = null;
-            let corpusPromise = null;
+            let requestId = 0;
+            const pendingRequests = new Map();
             function textOf(element){ return (element.innerText || element.textContent || '').replace(/\\s+/g, ' ').trim(); }
-            async function findInfo(word){
-                if(!corpusPromise){
-                    corpusPromise = window.parent.tappyReadCorpus || Promise.resolve({});
-                }
-                const corpus = await corpusPromise;
+            function findInfo(word){
                 const key = textOf(word).toLowerCase();
-                const entry = corpus[key];
                 let current = word.parentElement, row = null;
                 for(let level = 0; current && level < 6; level++, current = current.parentElement){
                     const text = textOf(current);
                     if(text.length >= word.textContent.trim().length && text.length <= 220 && current.children.length >= 2){ row = current; break; }
                 }
                 const rowText = row ? textOf(row) : word.textContent.trim();
-                const phonetic = entry?.ph || '暂无音标';
                 const pos = rowText.match(/\\b(?:n|v|adj|adv|pron|prep|conj|art|aux|num|det|phr)\\.?\\b/i)?.[0] || '暂无词性';
-                const meaning = entry?.zh || '暂无中文释义';
-                return { phonetic, pos, meaning };
+                return new Promise(resolve => {
+                    const id = ++requestId;
+                    const timeout = setTimeout(() => {
+                        pendingRequests.delete(id);
+                        resolve({ phonetic: '暂无音标', pos, meaning: '暂无中文释义' });
+                    }, 2000);
+                    pendingRequests.set(id, { pos, resolve, timeout });
+                    window.parent.postMessage({ type: 'tappyread-word-info', text: key, requestId: id }, '*');
+                });
             }
+            window.addEventListener('message', event => {
+                if(event.data?.type !== 'tappyread-word-info-result') return;
+                const request = pendingRequests.get(event.data.requestId);
+                if(!request) return;
+                clearTimeout(request.timeout);
+                pendingRequests.delete(event.data.requestId);
+                request.resolve({ phonetic: event.data.phonetic || '暂无音标', pos: request.pos, meaning: event.data.meaning || '暂无中文释义' });
+            });
             async function show(event, word){
                 if(!card){
                     card = document.createElement('div');
@@ -2795,12 +2805,25 @@
             }
             if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind); else bind();
         })();<\/script>`;
-        if (html.includes('data-tappy-point-reader="v4"')) return html;
-        html = html.replace(/<script data-tappy-point-reader="v[23]">[\s\S]*?<\/script>/gi, '');
+        if (html.includes('data-tappy-point-reader="v5"')) return html;
+        html = html.replace(/<script data-tappy-point-reader="v[2-4]">[\s\S]*?<\/script>/gi, '');
         return html.replace(/<\/body>/i, fallbackScript + tooltipScript + '</body>');
     }
 
     window.addEventListener('message', (event) => {
+        if (event.data?.type === 'tappyread-word-info') {
+            const key = String(event.data.text || '').trim().toLowerCase();
+            oxfordCorpusPromise.then(corpus => {
+                const entry = corpus[key] || {};
+                event.source?.postMessage({
+                    type: 'tappyread-word-info-result',
+                    requestId: event.data.requestId,
+                    phonetic: entry.ph,
+                    meaning: entry.zh
+                }, '*');
+            });
+            return;
+        }
         if (!event.data || event.data.type !== 'tappyread-word' || !event.data.text) return;
         const frame = Array.from(document.querySelectorAll('.html-page-box iframe'))
             .find(item => item.contentWindow === event.source);
