@@ -1135,7 +1135,7 @@
                 <button class="action-btn action-btn-primary" id="batchImportBtn">📦 批量导入绘本</button>
                 <button class="action-btn action-btn-blue" id="newStoryBtn">📖 新增绘本</button>
                 <button class="add-page-btn" id="openAddModalBtn">➕ 添加绘本页面</button>
-                <button class="action-btn action-btn-orange" id="dirSettingBtn">📁 图片目录</button>
+                <button class="action-btn action-btn-orange" id="dirSettingBtn">📁 目录配置</button>
                 <div class="voice-pill" title="朗读设置">
                     <span class="voice-icon">🎙️</span>
                     <select class="voice-select" id="voiceSelect" title="选择朗读音色"></select>
@@ -1316,23 +1316,35 @@
 
 <!-- ============ Modal: Image directory ============ -->
 <div class="modal-overlay" id="dirModalOverlay">
-    <div class="modal-box narrow">
+    <div class="modal-box narrow" style="max-width:620px;">
         <div class="modal-header">
-            <h3>本地图片目录设置</h3>
+            <h3>目录配置</h3>
             <button class="modal-close" id="closeDirModalBtn">✕</button>
         </div>
         <div class="modal-body">
             <div class="field">
-                <label>绘本图片所在目录（本机绝对路径）</label>
+                <label>图片目录（绘本图片读取路径）</label>
                 <div class="dir-selector-row">
                     <input type="text" id="dirInput" placeholder="/Volumes/U盘/jpeg/ 或 /Users/.../jpeg/">
                     <button class="dir-pick-btn" id="dirPickBtn">📂 选择</button>
                 </div>
-                <div class="dir-volume-hint">💡 支持选择 U 盘、移动硬盘、本地磁盘等任意目录。点击「选择」后，在弹出的系统对话框中选择目标文件夹，路径将自动填入并保存。</div>
-                <div class="hint-text">绘本页面按「文件名」引用此目录下的图片。修改目录后，所有绘本会立即从新目录加载。</div>
+                <div class="dir-volume-hint">💡 图片目录保持原功能不变，仍按文件名读取本地/云端图片目录。</div>
+                <div class="hint-text">原图片目录读取逻辑保持不变，绘本图片仍从图片目录加载。</div>
             </div>
+
+            <div class="field">
+                <label>HTML 目录（HTML 一键生成绘本读取路径）</label>
+                <div class="dir-selector-row">
+                    <input type="text" id="htmlDirInput" placeholder="https://.../html/ 或 /Users/.../html/">
+                    <button class="dir-pick-btn" id="htmlDirPickBtn">📂 选择</button>
+                </div>
+                <div class="dir-volume-hint">💡 HTML 目录独立配置，浏览器刷新后，HTML 一键生成的绘本会从这里读取原始 HTML 文件。</div>
+                <div class="hint-text">HTML 一键生成绘本读取路径与图片目录互相独立，图片读图片目录，HTML 读 HTML 目录。</div>
+            </div>
+
             <div class="modal-actions">
-                <button class="btn primary" id="confirmDirBtn">保存</button>
+                <button class="btn primary" id="confirmDirBtn">保存图片目录</button>
+                <button class="btn primary" id="confirmHtmlDirBtn" style="background:var(--tent-blue);">保存 HTML 目录</button>
                 <button class="btn" id="cancelDirBtn">取消</button>
             </div>
         </div>
@@ -1617,13 +1629,30 @@
     /* =====================================================================
        ===== 数据持久化核心 =====
        ===================================================================== */
-    const LS_LIB_KEY  = 'wib:library:v26';
-    const LS_DIR_KEY  = 'wib:imgDir';
-    const LS_FOLDER_KEY = 'wib:selectedFolder';
-    const LS_WHITELIST_KEY = 'wib:whitelist';
-    const LS_COLLAPSED_KEY = 'wib:collapsed_v2';
     const API_BASE = '/api';
     const AUTH_TOKEN_KEY = 'tappyread_auth_token';
+    const USER_ID_KEY = 'tappyread_user_id';
+
+    /* =====================================================================
+       登录守卫 + 用户级数据隔离
+       未登录（无 token / 无用户 ID）时直接回登录页；
+       所有本地缓存键均带用户 ID 后缀，同一浏览器多账号互不串数据
+       ===================================================================== */
+    const __authToken = localStorage.getItem(AUTH_TOKEN_KEY);
+    const __userId = localStorage.getItem(USER_ID_KEY);
+    if (!__authToken || !__userId) {
+        location.replace('index.html');
+        throw new Error('未登录，正在跳转登录页');
+    }
+    const USER_SCOPE = ':' + __userId;
+    const LS_LIB_KEY  = 'wib:library:v26' + USER_SCOPE;
+    const LS_DIR_KEY  = 'wib:imgDir' + USER_SCOPE;
+    const LS_HTML_DIR_KEY = 'wib:htmlDir' + USER_SCOPE;
+    const LS_FOLDER_KEY = 'wib:selectedFolder' + USER_SCOPE;
+    const LS_WHITELIST_KEY = 'wib:whitelist' + USER_SCOPE;
+    const LS_COLLAPSED_KEY = 'wib:collapsed_v2' + USER_SCOPE;
+    const CURRENT_STORY_KEY = 'wib:currentStoryId' + USER_SCOPE;
+    const IMAGE_CACHE_KEY = 'wib:imageCache' + USER_SCOPE;
 
     function loadOxfordCorpus() {
         return fetch('oxford_corpus_complete.json', { cache: 'no-store' })
@@ -1659,11 +1688,17 @@
     // 默认图片目录：优先使用腾讯云COS，同时保留本地目录作为回退
     const DEFAULT_COS_DIR = 'https://tappyreadjpeg-1325106148.cos.ap-guangzhou.myqcloud.com/jpeg/';
     const DEFAULT_LOCAL_DIR = 'https://tappyreadjpeg-1325106148.cos.ap-guangzhou.myqcloud.com/jpeg/';
+    const DEFAULT_HTML_COS_DIR = 'https://tappyreadjpeg-1325106148.cos.ap-guangzhou.myqcloud.com/html/';
+    const DEFAULT_HTML_LOCAL_DIR = 'https://tappyreadjpeg-1325106148.cos.ap-guangzhou.myqcloud.com/html/';
+
+    function normalizeDirValue(value) {
+        const v = String(value || '').trim().replace(/\\/g, '/');
+        return v && !v.endsWith('/') ? v + '/' : v;
+    }
 
     // 从 localStorage 读取，如果没有则使用COS作为默认值（线上环境优先）
     let imgDir = localStorage.getItem(LS_DIR_KEY);
     if (!imgDir) {
-        // 检查是否在本地环境（通过协议判断）
         if (window.location.protocol === 'file:') {
             imgDir = DEFAULT_LOCAL_DIR;
         } else {
@@ -1671,7 +1706,18 @@
         }
         localStorage.setItem(LS_DIR_KEY, imgDir);
     }
-    if(!imgDir.endsWith('/')) imgDir += '/';
+    imgDir = normalizeDirValue(imgDir);
+
+    let htmlDir = localStorage.getItem(LS_HTML_DIR_KEY);
+    if (!htmlDir) {
+        if (window.location.protocol === 'file:') {
+            htmlDir = DEFAULT_HTML_LOCAL_DIR;
+        } else {
+            htmlDir = DEFAULT_HTML_COS_DIR;
+        }
+        localStorage.setItem(LS_HTML_DIR_KEY, htmlDir);
+    }
+    htmlDir = normalizeDirValue(htmlDir);
 
     /* =====================================================================
        ===== 单词白名单 =====
@@ -1865,32 +1911,96 @@
        ===================================================================== */
     const sessionSrcCache = {};
 
+    /* =====================================================================
+       ===== 腾讯云 COS 图片异步上传 =====
+       ===================================================================== */
+    const COS_BASE = 'https://tappyreadjpeg-1325106148.cos.ap-guangzhou.myqcloud.com/';
+    let cosUploadChain = Promise.resolve(); // 全局串行上传链，避免并发风暴打爆服务器
+
+    // 单张图片异步上传到 COS，成功返回 {key,url}，失败返回 null（不阻塞导入流程）
+    async function uploadPageImageToCos(fileName, dataUrl){
+        if(!dataUrl || !/^data:image\//i.test(dataUrl)) return null;
+        try {
+            const res = await fetch(API_BASE + '/upload/image', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + __authToken
+                },
+                body: JSON.stringify({
+                    fileName: fileName || 'page.jpg',
+                    dataUrl: dataUrl
+                })
+            });
+            if(!res.ok) return null;
+            const data = await res.json();
+            return (data && data.ok && data.key) ? { key: data.key, url: data.url } : null;
+        } catch(e) {
+            return null;
+        }
+    }
+
+    // 将一批图片串行异步上传到 COS，返回 [{file, cosKey}]，cosKey 为 null 表示该张上传失败
+    function uploadPagesToCos(items){
+        const results = [];
+        const pending = (items || []).filter(p => p && p.dataUrl);
+        cosUploadChain = cosUploadChain.then(async () => {
+            for(const p of pending){
+                const r = await uploadPageImageToCos(p.file, p.dataUrl);
+                results.push({ file: p.file, cosKey: r ? r.key : null });
+            }
+        });
+        return cosUploadChain.then(() => results);
+    }
+
     // 核心图片加载函数：兼容本地目录和腾讯云COS
+    function resolveFileFromDir(baseDir, fileName) {
+        if (!fileName) return '';
+        const name = String(fileName).trim();
+        if (/^(https?:|data:|blob:|file:)/i.test(name)) {
+            return name;
+        }
+        const dir = normalizeDirValue(baseDir);
+        if (dir.startsWith('http://') || dir.startsWith('https://')) {
+            const baseUrl = dir.endsWith('/') ? dir : dir + '/';
+            return new URL(encodeURIComponent(name), baseUrl).href;
+        }
+        const localDir = dir.endsWith('/') ? dir : dir + '/';
+        return encodeURI('file://' + localDir + name);
+    }
+
+    function isHtmlPageLike(page){
+        if (!page) return false;
+        if (page.html) return true;
+        if (page.htmlCosKey) return true;
+        const fileName = String(page.file || '').trim();
+        return /\.html?$/i.test(fileName) || /html\//i.test(fileName);
+    }
+
+    function getPageSourceDir(page){
+        if (!page) return imgDir;
+        return isHtmlPageLike(page) ? htmlDir : imgDir;
+    }
+
     function pageSrc(page){
         if(!page) return '';
-        // 1. 优先从 session 缓存 (Base64) 加载
+        if(page.html) return '';
+        if(isHtmlPageLike(page)) {
+            const fileName = String(page.file || '').trim();
+            if (fileName) return resolveFileFromDir(getPageSourceDir(page), fileName);
+            return '';
+        }
         if(page.file && sessionSrcCache[page.file]) {
             return sessionSrcCache[page.file];
         }
-        // 2. 如果页面本身有 src 属性（通常是 Base64 数据）
+        if(page.cosKey) {
+            return COS_BASE + page.cosKey;
+        }
         if(page.src) {
             return page.src;
         }
-        // 3. 从配置的 imgDir 加载（支持本地路径和COS地址）
         if(page.file) {
-            const fileName = String(page.file).trim();
-            if (/^(https?:|data:|blob:|file:)/i.test(fileName)) {
-                return fileName;
-            }
-            // 判断 imgDir 是否为网络地址
-            if (imgDir.startsWith('http://') || imgDir.startsWith('https://')) {
-                const baseUrl = imgDir.endsWith('/') ? imgDir : imgDir + '/';
-                return new URL(encodeURIComponent(fileName), baseUrl).href;
-            } else {
-                // 本地文件路径：使用 file:// 协议
-                const localDir = imgDir.endsWith('/') ? imgDir : imgDir + '/';
-                return encodeURI('file://' + localDir + fileName);
-            }
+            return resolveFileFromDir(getPageSourceDir(page), page.file);
         }
         return '';
     }
@@ -1901,32 +2011,91 @@
     let currentSpread = 0;
     let collapsedNodes = new Set();
     let dragData = null;
+    let hasExplicitStorySelection = false;
 
-    function saveLibrary(){
+    function compactLibraryForLocalStorage(nodes) {
+        if (!Array.isArray(nodes)) return [];
+        return nodes.map((node) => {
+            const compact = { ...node };
+            if (Array.isArray(compact.children)) {
+                compact.children = compactLibraryForLocalStorage(compact.children);
+            }
+            if (Array.isArray(compact.pages)) {
+                compact.pages = compact.pages.map((page) => {
+                    const safePage = { ...page };
+                    // HTML 生成书页必须保留 page.html，避免刷新后被迫回退到错误的 htmlDir 文件地址。
+                    delete safePage.dataUrl;
+                    return safePage;
+                });
+            }
+            delete compact.dataUrl;
+            return compact;
+        });
+    }
+
+    function snapshotLibraryState(){
+        return {
+            tree: Array.isArray(library) ? library : [],
+            collapsed: [...collapsedNodes],
+            selectedFolderId: selectedFolderId || null,
+            currentStoryId: currentStoryId || null
+        };
+    }
+
+    function applyLibrarySnapshot(snapshot){
+        if (!snapshot || !Array.isArray(snapshot.tree)) return false;
+        library = snapshot.tree;
+        collapsedNodes = new Set(Array.isArray(snapshot.collapsed) ? snapshot.collapsed : []);
+        const validFolder = snapshot.selectedFolderId ? findNodeById(library, snapshot.selectedFolderId) : null;
+        selectedFolderId = validFolder && validFolder.type === 'folder' ? snapshot.selectedFolderId : null;
+        const validStory = snapshot.currentStoryId ? findNodeById(library, snapshot.currentStoryId) : null;
+        currentStoryId = validStory ? snapshot.currentStoryId : null;
+        if (selectedFolderId) localStorage.setItem(LS_FOLDER_KEY, selectedFolderId);
+        else localStorage.removeItem(LS_FOLDER_KEY);
+        if (currentStoryId) localStorage.setItem(CURRENT_STORY_KEY, currentStoryId);
+        else localStorage.removeItem(CURRENT_STORY_KEY);
+        localStorage.setItem(LS_COLLAPSED_KEY, JSON.stringify([...collapsedNodes]));
+        return true;
+    }
+
+    async function saveLibrary(){
         try{
-            const data = {
-                tree: library,
-                collapsed: [...collapsedNodes]
+            const snapshot = snapshotLibraryState();
+            const safeCache = {
+                tree: compactLibraryForLocalStorage(snapshot.tree),
+                collapsed: snapshot.collapsed,
+                selectedFolderId: snapshot.selectedFolderId || null,
+                currentStoryId: snapshot.currentStoryId || null
             };
-            localStorage.setItem(LS_LIB_KEY, JSON.stringify(data));
-            if(selectedFolderId) localStorage.setItem(LS_FOLDER_KEY, selectedFolderId);
-            else localStorage.removeItem(LS_FOLDER_KEY);
-            localStorage.setItem(LS_COLLAPSED_KEY, JSON.stringify([...collapsedNodes]));
+            try {
+                localStorage.setItem(LS_LIB_KEY, JSON.stringify(safeCache));
+                if(snapshot.selectedFolderId) localStorage.setItem(LS_FOLDER_KEY, snapshot.selectedFolderId);
+                else localStorage.removeItem(LS_FOLDER_KEY);
+                localStorage.setItem(LS_COLLAPSED_KEY, JSON.stringify(snapshot.collapsed));
+                if(snapshot.currentStoryId) localStorage.setItem(CURRENT_STORY_KEY, snapshot.currentStoryId);
+                else localStorage.removeItem(CURRENT_STORY_KEY);
+            } catch (localErr) {
+                console.warn('本地缓存写入超出容量，继续保留云端同步', localErr);
+            }
             const token = localStorage.getItem(AUTH_TOKEN_KEY);
             if(token){
-                fetch(`${API_BASE}/library`, {
+                const response = await fetch(`${API_BASE}/library`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
                     credentials: 'include',
-                    body: JSON.stringify({
-                        tree: library,
-                        collapsed: [...collapsedNodes],
-                        selectedFolderId,
-                        currentStoryId
-                    })
-                }).catch(error => console.warn('同步绘本目录失败', error));
+                    body: JSON.stringify(snapshot)
+                });
+                if(!response.ok){
+                    const errorText = await response.text().catch(() => '');
+                    throw new Error(errorText || `目录同步失败: ${response.status}`);
+                }
+                return true;
             }
-        }catch(err){ console.warn('缓存失败', err); }
+            return true;
+        }catch(err){
+            console.warn('缓存失败', err);
+            return false;
+        }
     }
 
     function loadLibraryData(){
@@ -1935,7 +2104,12 @@
             if(!raw) return null;
             const data = JSON.parse(raw);
             if(!data || !data.tree || !Array.isArray(data.tree)) return null;
-            return data;
+            return {
+                tree: data.tree,
+                collapsed: Array.isArray(data.collapsed) ? data.collapsed : [],
+                selectedFolderId: data.selectedFolderId || null,
+                currentStoryId: data.currentStoryId || null
+            };
         }catch(err){ 
             console.warn('加载缓存失败', err);
             return null;
@@ -1956,10 +2130,20 @@
     const loadedData = loadLibraryData();
     if (loadedData && loadedData.tree && loadedData.tree.length > 0) {
         library = loadedData.tree;
-        if (loadedData.collapsed) {
-            collapsedNodes = new Set(loadedData.collapsed);
-        } else {
-            collapsedNodes = loadCollapsedState();
+        collapsedNodes = new Set(Array.isArray(loadedData.collapsed) ? loadedData.collapsed : loadCollapsedState());
+        const savedFolderId = loadedData.selectedFolderId || localStorage.getItem(LS_FOLDER_KEY);
+        if (savedFolderId) {
+            const folder = findNodeById(library, savedFolderId);
+            if (folder && folder.type === 'folder') {
+                selectedFolderId = savedFolderId;
+            }
+        }
+        const savedStoryId = loadedData.currentStoryId || localStorage.getItem(CURRENT_STORY_KEY);
+        if (savedStoryId) {
+            const story = findNodeById(library, savedStoryId);
+            if (story && story.type === 'story') {
+                currentStoryId = savedStoryId;
+            }
         }
     } else {
         library = [];
@@ -1974,43 +2158,86 @@
         }
     }
 
+    // 不在首次进入页面时自动选中第一本绘本；保持与图片绘本一致：必须由用户点击后才显示内容。
     const allStories = getAllStories(library);
-    if (allStories.length > 0 && !currentStoryId) {
-        try {
-            const savedStoryId = localStorage.getItem('wib:currentStoryId');
-            if (savedStoryId && findNodeById(library, savedStoryId)) {
-                currentStoryId = savedStoryId;
-            } else {
-                currentStoryId = allStories[0].id;
-            }
-        } catch(e) {
-            currentStoryId = allStories[0].id;
+    if (!hasExplicitStorySelection) {
+        currentStoryId = null;
+        localStorage.removeItem(CURRENT_STORY_KEY);
+    }
+    if (allStories.length > 0 && !selectedFolderId && library.length > 0) {
+        const firstRootFolder = library.find(node => node && node.type === 'folder');
+        if (firstRootFolder) {
+            selectedFolderId = firstRootFolder.id;
+            localStorage.setItem(LS_FOLDER_KEY, selectedFolderId);
         }
     }
 
     async function loadRemoteLibrary(){
         const token = localStorage.getItem(AUTH_TOKEN_KEY);
-        if(!token) return;
+        if(!token){
+            location.replace('index.html');
+            return;
+        }
         try{
             const response = await fetch(`${API_BASE}/library`, {
                 headers: { Authorization: `Bearer ${token}` },
                 credentials: 'include'
             });
             if(response.status === 401){
+                // 登录已过期：清除本账号凭据并回登录页重新登录
                 localStorage.removeItem(AUTH_TOKEN_KEY);
+                localStorage.removeItem(USER_ID_KEY);
+                localStorage.removeItem('tappyread_last_user');
+                location.replace('index.html');
                 return;
             }
             if(!response.ok) throw new Error(`目录加载失败: ${response.status}`);
             const data = await response.json();
+            const localData = loadLibraryData();
+            const localTree = localData && Array.isArray(localData.tree) ? localData.tree : [];
+            const localHasData = localTree.length > 0;
+
             if(!Array.isArray(data.tree) || !data.tree.length){
-                if(library.length) saveLibrary();
+                if(localHasData){
+                    applyLibrarySnapshot(localData);
+                    if (!hasExplicitStorySelection) {
+                        currentStoryId = null;
+                        localStorage.removeItem(CURRENT_STORY_KEY);
+                    }
+                    if (!selectedFolderId && library.length > 0) {
+                        const rootFolder = library.find(node => node && node.type === 'folder');
+                        if (rootFolder) {
+                            selectedFolderId = rootFolder.id;
+                        }
+                    }
+                    saveLibrary();
+                    renderTree();
+                    renderAll(false);
+                }
                 return;
             }
-            library = data.tree;
-            collapsedNodes = new Set(Array.isArray(data.collapsed) ? data.collapsed : []);
-            selectedFolderId = data.selectedFolderId || null;
-            currentStoryId = data.currentStoryId || getAllStories(library)[0]?.id || null;
-            localStorage.setItem(LS_LIB_KEY, JSON.stringify({ tree: library, collapsed: [...collapsedNodes] }));
+            applyLibrarySnapshot({
+                tree: data.tree,
+                collapsed: Array.isArray(data.collapsed) ? data.collapsed : [],
+                selectedFolderId: data.selectedFolderId || null,
+                currentStoryId: data.currentStoryId || null
+            });
+            if (!hasExplicitStorySelection) {
+                currentStoryId = null;
+                localStorage.removeItem(CURRENT_STORY_KEY);
+            }
+            if (!selectedFolderId && library.length > 0) {
+                const rootFolder = library.find(node => node && node.type === 'folder');
+                if (rootFolder) {
+                    selectedFolderId = rootFolder.id;
+                }
+            }
+            localStorage.setItem(LS_LIB_KEY, JSON.stringify({
+                tree: compactLibraryForLocalStorage(library),
+                collapsed: [...collapsedNodes],
+                selectedFolderId: selectedFolderId || null,
+                currentStoryId: currentStoryId || null
+            }));
             renderTree();
             renderAll(false);
         }catch(error){
@@ -2095,7 +2322,7 @@
         }
         saveLibrary();
         renderTree();
-        if(currentStoryId) localStorage.setItem('wib:currentStoryId', currentStoryId);
+        if(currentStoryId) localStorage.setItem(CURRENT_STORY_KEY, currentStoryId);
     }
 
     function getNodeSortKey(node){
@@ -2140,18 +2367,55 @@
         });
     }
 
-    // 增强的导出备份：包含图片 Base64 数据
+    function deriveHtmlDirFromImgDir(imgDirValue) {
+        const fallback = normalizeDirValue(imgDirValue || DEFAULT_HTML_COS_DIR);
+        if (!fallback) return normalizeDirValue(DEFAULT_HTML_COS_DIR);
+        if (/\/html\//i.test(fallback)) return fallback;
+        if (/\/jpeg\//i.test(fallback)) {
+            return normalizeDirValue(fallback.replace(/\/jpeg\/?$/i, '/html/'));
+        }
+        if (/\/images?\//i.test(fallback)) {
+            return normalizeDirValue(fallback.replace(/\/images?\/?$/i, '/html/'));
+        }
+        return normalizeDirValue(DEFAULT_HTML_COS_DIR);
+    }
+
+    function normalizeImportedBackup(rawBackup) {
+        const source = rawBackup && typeof rawBackup === 'object' ? rawBackup : {};
+        const candidateTree = Array.isArray(source.tree)
+            ? source.tree
+            : Array.isArray(source.library)
+                ? source.library
+                : Array.isArray(source.data)
+                    ? source.data
+                    : [];
+
+        const normalized = {
+            ...source,
+            tree: candidateTree,
+            imgDir: normalizeDirValue(source.imgDir || source.imageDir || imgDir || DEFAULT_COS_DIR),
+            htmlDir: normalizeDirValue(source.htmlDir || source.htmlDirectory || deriveHtmlDirFromImgDir(source.imgDir || source.imageDir || imgDir || DEFAULT_COS_DIR))
+        };
+
+        if (!normalized.tree.length && Array.isArray(source.root) && source.root.length) {
+            normalized.tree = source.root;
+        }
+        if (!normalized.tree.length && source.root && Array.isArray(source.root.children)) {
+            normalized.tree = source.root.children;
+        }
+
+        return normalized;
+    }
+
+    // 增强的导出备份：包含图片 Base64 数据，并保留 HTML / 图片目录分离
     async function exportBackup() {
-        // 收集所有需要导出的图片数据
         const allPages = getAllPages(library);
         const imageDataMap = {};
 
         for (const page of allPages) {
             if (page.file && sessionSrcCache[page.file]) {
-                // 如果缓存中有 Base64 数据，直接使用
                 imageDataMap[page.file] = sessionSrcCache[page.file];
             } else if (page.file) {
-                // 尝试从 DOM 中获取已加载的图片
                 const imgElements = document.querySelectorAll('img');
                 for (const img of imgElements) {
                     const src = img.getAttribute('src') || '';
@@ -2163,29 +2427,27 @@
                         }
                     }
                 }
-                // 如果还没有获取到，尝试从 sessionSrcCache 中获取
                 if (!imageDataMap[page.file] && sessionSrcCache[page.file]) {
                     imageDataMap[page.file] = sessionSrcCache[page.file];
                 }
             }
         }
 
-        // 构建备份数据
         const backupData = {
-            version: '2.0', // 版本升级，标识包含图片数据
+            version: '3.0',
             timestamp: new Date().toISOString(),
-            imgDir: imgDir,
+            imgDir: normalizeDirValue(imgDir || DEFAULT_COS_DIR),
+            htmlDir: normalizeDirValue(htmlDir || deriveHtmlDirFromImgDir(imgDir)),
             tree: JSON.parse(JSON.stringify(library)),
             selectedFolderId: selectedFolderId,
             collapsed: [...collapsedNodes],
             whitelist: whitelist,
             currentStoryId: currentStoryId,
             currentSpread: currentSpread,
-            imageData: imageDataMap // 新增：图片 Base64 数据
+            imageData: imageDataMap
         };
 
         const jsonStr = JSON.stringify(backupData, null, 2);
-        // 如果数据太大，提示用户
         if (jsonStr.length > 50 * 1024 * 1024) {
             if (!confirm('备份文件较大（超过50MB），可能无法完整保存。建议分批次导出。\n\n是否继续？')) {
                 return;
@@ -2218,20 +2480,21 @@
         return pages;
     }
 
-    // 增强的导入备份：恢复图片 Base64 数据
-    function importBackup(file) {
+    // 增强的导入备份：兼容历史 JSON，并支持混合图片/HTML 绘本目录
+    async function importBackup(file) {
         const reader = new FileReader();
-        reader.onload = function(e) {
+        reader.onload = async function(e) {
             try {
-                const backupData = JSON.parse(e.target.result);
-                if (!backupData.tree || !Array.isArray(backupData.tree)) {
+                const rawBackup = JSON.parse(e.target.result);
+                const backupData = normalizeImportedBackup(rawBackup);
+                if (!Array.isArray(backupData.tree) || !backupData.tree.length) {
                     alert('无效的备份文件：缺少目录树数据');
                     return;
                 }
 
-                // 检查版本，提示用户
-                const isV2 = backupData.version === '2.0' || backupData.imageData;
-                if (!isV2) {
+                const isLegacy = !backupData.htmlDir || backupData.version === '1.0' || backupData.version === '2.0' || !backupData.imageData;
+                const isV2 = backupData.version === '2.0' || backupData.version === '3.0' || !!backupData.imageData;
+                if (isLegacy && !isV2) {
                     if (!confirm('此备份文件为旧版本（不含图片数据），导入后图片可能无法显示。\n\n建议使用新版导出的备份文件。\n\n是否继续导入？')) {
                         return;
                     }
@@ -2259,11 +2522,12 @@
                     saveWhitelist(whitelist);
                     renderWhitelistTags();
                 }
-                if (backupData.imgDir) {
-                    imgDir = backupData.imgDir;
-                    if(!imgDir.endsWith('/')) imgDir += '/';
-                    localStorage.setItem(LS_DIR_KEY, imgDir);
-                }
+
+                imgDir = normalizeDirValue(backupData.imgDir || imgDir || DEFAULT_COS_DIR);
+                htmlDir = normalizeDirValue(backupData.htmlDir || deriveHtmlDirFromImgDir(imgDir));
+                localStorage.setItem(LS_DIR_KEY, imgDir);
+                localStorage.setItem(LS_HTML_DIR_KEY, htmlDir);
+
                 if (backupData.currentStoryId) {
                     const story = findNodeById(library, backupData.currentStoryId);
                     currentStoryId = story ? backupData.currentStoryId : null;
@@ -2275,29 +2539,41 @@
                     currentStoryId = allStories.length > 0 ? allStories[0].id : null;
                     currentSpread = 0;
                 }
-                if (currentStoryId) localStorage.setItem('wib:currentStoryId', currentStoryId);
+                if (currentStoryId) localStorage.setItem(CURRENT_STORY_KEY, currentStoryId);
 
-                // 恢复图片数据到 sessionSrcCache
                 if (backupData.imageData && typeof backupData.imageData === 'object') {
                     Object.keys(backupData.imageData).forEach(key => {
                         sessionSrcCache[key] = backupData.imageData[key];
                     });
-                    // 将图片数据也保存到 localStorage 中，以便持久化
                     try {
-                        localStorage.setItem('wib:imageCache', JSON.stringify(backupData.imageData));
+                        localStorage.setItem(IMAGE_CACHE_KEY, JSON.stringify(backupData.imageData));
                     } catch(e) {
                         console.warn('图片数据较大，无法全部存入 localStorage，将在会话中保留');
                     }
+                    const allPages = getAllStories(library).flatMap(s => (s.pages || []));
+                    const toUpload = allPages
+                        .filter(p => !p.cosKey && p.file && backupData.imageData[p.file])
+                        .map(p => ({ file: p.file, dataUrl: backupData.imageData[p.file] }));
+                    if (toUpload.length > 0) {
+                        uploadPagesToCos(toUpload).then(results => {
+                            let changed = false;
+                            for (const r of results) {
+                                if (!r.cosKey) continue;
+                                const page = allPages.find(p => p.file === r.file);
+                                if (page && !page.cosKey) { page.cosKey = r.cosKey; changed = true; }
+                            }
+                            if (changed) saveLibrary();
+                        }).catch(() => {});
+                    }
                 }
 
-                // 如果是旧版本，尝试从本地路径加载图片（兼容旧版）
                 if (!backupData.imageData) {
                     alert('⚠️ 此备份文件为旧版本，不含图片数据。\n\n请确保图片目录设置正确，否则图片将无法显示。');
                 }
 
-                saveLibrary();
+                await saveLibrary();
                 renderAll(true);
-                alert(`✅ 备份导入成功！\n\n绘本目录及页面文本已恢复。\n${backupData.imageData ? '✅ 图片数据已恢复' : '⚠️ 请手动设置图片目录'}\n图片目录已更新为：${imgDir}`);
+                alert(`✅ 备份导入成功！\n\n绘本目录及页面文本已恢复。\n${backupData.imageData ? '✅ 图片数据已恢复' : '⚠️ 请手动设置图片目录'}\n图片目录已更新为：${imgDir}\nHTML 目录已更新为：${htmlDir}`);
             } catch(err) {
                 alert('❌ 导入失败：备份文件格式无效\n\n错误信息：' + err.message);
                 console.error(err);
@@ -2312,7 +2588,7 @@
     // 在页面加载时尝试恢复图片缓存
     function restoreImageCache() {
         try {
-            const cached = localStorage.getItem('wib:imageCache');
+            const cached = localStorage.getItem(IMAGE_CACHE_KEY);
             if (cached) {
                 const data = JSON.parse(cached);
                 if (typeof data === 'object') {
@@ -2547,10 +2823,34 @@
         return true;
     }
 
+    async function deleteCosKeys(keys) {
+        const safeKeys = Array.from(new Set((keys || []).filter(Boolean)));
+        if (!safeKeys.length) return;
+        try {
+            await fetch(API_BASE + '/images/delete', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + __authToken
+                },
+                body: JSON.stringify({ keys: safeKeys })
+            });
+        } catch (err) {
+            console.warn('删除COS图片失败', err);
+        }
+    }
+
     function deleteStoryById(storyId){
         const story = findNodeById(library, storyId);
         if(!story || story.type !== 'story') return;
         if(!confirm(`确定要删除绘本《${story.title}》吗？此操作不可恢复。`)) return;
+
+        const cosKeys = Array.from(new Set((story.pages || [])
+            .flatMap(p => [p.cosKey, p.htmlCosKey])
+            .filter(Boolean)));
+        if (cosKeys.length > 0) {
+            deleteCosKeys(cosKeys);
+        }
 
         const parent = findParentNode(library, storyId);
         if(parent){
@@ -2567,7 +2867,7 @@
             const allStories = getAllStories(library);
             currentStoryId = allStories.length > 0 ? allStories[allStories.length-1].id : null;
             currentSpread = 0;
-            if(currentStoryId) localStorage.setItem('wib:currentStoryId', currentStoryId);
+            if(currentStoryId) localStorage.setItem(CURRENT_STORY_KEY, currentStoryId);
         }
         saveLibrary();
         renderAll(true);
@@ -2626,26 +2926,21 @@
     }
 
     function getCurrentStory(){
-        if(!currentStoryId) {
-            const allStories = getAllStories(library);
-            if(allStories.length > 0) {
-                currentStoryId = allStories[0].id;
-                localStorage.setItem('wib:currentStoryId', currentStoryId);
-            } else {
-                return null;
-            }
-        }
+        if(!currentStoryId) return null;
         const story = findNodeById(library, currentStoryId);
-        if(!story || story.type !== 'story'){
-            const allStories = getAllStories(library);
-            if(allStories.length > 0) {
-                currentStoryId = allStories[allStories.length-1].id;
-                localStorage.setItem('wib:currentStoryId', currentStoryId);
-                return findNodeById(library, currentStoryId);
-            }
+        if(!story || story.type !== 'story') {
+            currentStoryId = null;
+            hasExplicitStorySelection = false;
+            localStorage.removeItem(CURRENT_STORY_KEY);
             return null;
         }
         return story;
+    }
+
+    function getDefaultSelectedFolderId(){
+        if (!Array.isArray(library)) return null;
+        const rootFolder = library.find(node => node && node.type === 'folder');
+        return rootFolder ? rootFolder.id : null;
     }
 
     function totalSpreads(story){ return Math.max(1, Math.ceil(story.pages.length / 2)); }
@@ -2799,7 +3094,7 @@
             }
             if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind); else bind();
         })();<\/script>`;
-        const tooltipScript = `<script data-tappy-point-reader="v6">(function(){
+        const tooltipScript = `<script data-tappy-point-reader="v7">(function(){
             let card = null;
             let requestId = 0;
             const pendingRequests = new Map();
@@ -2862,14 +3157,30 @@
                     word.addEventListener('mouseleave', hide);
                 });
             }
+            // 双击任意位置（含空白/文本区域）→ 通知父页面切换全屏
+            // 排除输入控件/链接/视频等交互元素，避免误触发
+            document.addEventListener('dblclick', event => {
+                const t = event.target;
+                if(!t) return;
+                const tag = (t.tagName || '').toLowerCase();
+                if(['textarea','input','select','option','button','a','iframe','video','audio','label','canvas'].includes(tag)) return;
+                if(t.isContentEditable) return;
+                event.preventDefault();
+                event.stopPropagation();
+                window.parent.postMessage({ type: 'tappyread-toggle-fullscreen' }, '*');
+            }, true);
             if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind); else bind();
         })();<\/script>`;
-        if (html.includes('data-tappy-point-reader="v6"')) return html;
-        html = html.replace(/<script data-tappy-point-reader="v[2-5]">[\s\S]*?<\/script>/gi, '');
+        if (html.includes('data-tappy-point-reader="v7"')) return html;
+        html = html.replace(/<script data-tappy-point-reader="v[2-6]">[\s\S]*?<\/script>/gi, '');
         return html.replace(/<\/body>/i, fallbackScript + tooltipScript + '</body>');
     }
 
     window.addEventListener('message', (event) => {
+        if (event.data?.type === 'tappyread-toggle-fullscreen') {
+            toggleReaderFullscreen();
+            return;
+        }
         if (event.data?.type === 'tappyread-word-info') {
             const key = String(event.data.text || '').trim().toLowerCase();
             oxfordCorpusPromise.then(corpus => {
@@ -3121,8 +3432,9 @@
                     if(e.target.closest('.drag-handle') || e.target.closest('.node-btn')) return;
                     if(hasPages) toggleNodeCollapse(node.id);
                     currentStoryId = node.id;
+                    hasExplicitStorySelection = true;
                     currentSpread = 0;
-                    localStorage.setItem('wib:currentStoryId', currentStoryId);
+                    localStorage.setItem(CURRENT_STORY_KEY, currentStoryId);
                     renderAll(true);
                 });
 
@@ -3153,8 +3465,9 @@
                         pDiv.addEventListener('click', (e)=>{
                             if(e.target.closest('.pl-del')) return;
                             currentStoryId = node.id;
+                            hasExplicitStorySelection = true;
                             currentSpread = Math.floor(pIdx/2);
-                            localStorage.setItem('wib:currentStoryId', currentStoryId);
+                            localStorage.setItem(CURRENT_STORY_KEY, currentStoryId);
                             renderAll(true);
                         });
                         pageList.appendChild(pDiv);
@@ -3181,6 +3494,11 @@
             return;
         }
         if(!confirm(`确定要删除第 ${pageIdx+1} 页吗？`)) return;
+        const removedPage = story.pages[pageIdx];
+        const relatedKeys = [removedPage?.cosKey, removedPage?.htmlCosKey].filter(Boolean);
+        if (relatedKeys.length > 0) {
+            deleteCosKeys(relatedKeys);
+        }
         story.pages.splice(pageIdx, 1);
         const total = totalSpreads(story);
         if(currentSpread >= total) currentSpread = Math.max(0, total - 1);
@@ -3259,7 +3577,7 @@
                 } else {
                     currentStoryId = node.id;
                     currentSpread = 0;
-                    localStorage.setItem('wib:currentStoryId', currentStoryId);
+                    localStorage.setItem(CURRENT_STORY_KEY, currentStoryId);
                     renderAll(true);
                     searchInput.value = '';
                     searchQuery = '';
@@ -3289,13 +3607,19 @@
             return panel;
         }
 
-        if (page.html) {
+        const isHtmlPage = isHtmlPageLike(page);
+        if (isHtmlPage) {
             const htmlBox = document.createElement('div');
             htmlBox.className = 'page-img-box html-page-box';
             const frame = document.createElement('iframe');
             frame.title = page.text || ('第 ' + (globalIndex + 1) + ' 页');
             frame.setAttribute('sandbox', 'allow-scripts');
-            frame.srcdoc = ensureHtmlPointReader(page.html);
+            if (page.html) {
+                frame.srcdoc = ensureHtmlPointReader(page.html);
+            } else {
+                const htmlFile = String(page.file || '').trim();
+                frame.src = htmlFile ? resolveFileFromDir(getPageSourceDir(page), htmlFile) : '';
+            }
             htmlBox.appendChild(frame);
             htmlBox.addEventListener('click', (e)=>{
                 spawnRipple(e, htmlBox);
@@ -3537,6 +3861,7 @@
 
     function renderSpread(autoSpeak){
         const story = getCurrentStory();
+        const shouldPromptFolderSelection = !selectedFolderId || !story;
         if(!story || story.pages.length === 0){
             spreadEl.innerHTML = '';
             const empty = document.createElement('div');
@@ -3544,11 +3869,13 @@
             empty.style.flex = '1';
             const msg = document.createElement('div');
             msg.className = 'empty-msg';
-            msg.textContent = '📖 点击「添加绘本页面」开始创建';
+            msg.textContent = shouldPromptFolderSelection
+                ? '请选择绘本目录选择您要阅读的绘本！'
+                : '📖 点击「添加绘本页面」开始创建';
             empty.appendChild(msg);
             spreadEl.appendChild(empty);
             spreadTag.textContent = '0 / 0';
-            storyCaption.textContent = story ? story.title : '请创建绘本';
+            storyCaption.textContent = shouldPromptFolderSelection ? '请选择绘本目录' : (story ? story.title : '请创建绘本');
             prevBtn.disabled = true;
             nextBtn.disabled = true;
             return;
@@ -3588,7 +3915,7 @@
     function renderAll(autoSpeak){
     renderTree();
     renderSpread(!!autoSpeak);
-    if(currentStoryId) localStorage.setItem('wib:currentStoryId', currentStoryId);
+    if(currentStoryId) localStorage.setItem(CURRENT_STORY_KEY, currentStoryId);
     }
 
     /* =====================================================================
@@ -3828,7 +4155,7 @@
             if(story){
                 currentStoryId = story.id;
                 currentSpread = 0;
-                localStorage.setItem('wib:currentStoryId', currentStoryId);
+                localStorage.setItem(CURRENT_STORY_KEY, currentStoryId);
                 saveLibrary();
                 renderAll(true);
                 closeStoryModal();
@@ -4314,7 +4641,7 @@
         return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
     }
 
-    addAllBtn.addEventListener('click', () => {
+    addAllBtn.addEventListener('click', async () => {
         if (!pendingItems.length) return;
         const story = getCurrentStory();
         if (!story) { alert('请选择绘本'); return; }
@@ -4324,11 +4651,24 @@
             sessionSrcCache[item.name] = item.dataUrl;
             story.pages.push({ file: item.name, text: item.text.trim() });
         });
+        // 异步上传本次新增的图片到 COS，成功后回填 cosKey，确保刷新后图片不丢失
+        uploadPagesToCos(pendingItems.map(item => ({ file: item.name, dataUrl: item.dataUrl })))
+            .then(results => {
+                if (!results.length) return;
+                let changed = false;
+                for (const r of results) {
+                    if (!r.cosKey) continue;
+                    const page = story.pages.find(p => p.file === r.file);
+                    if (page && !page.cosKey) { page.cosKey = r.cosKey; changed = true; }
+                }
+                if (changed) saveLibrary();
+            })
+            .catch(() => {});
         currentSpread = Math.floor(insertAt / 2);
         pendingItems = [];
         renderPending();
         saveLibrary();
-        ocrStatusText.textContent = '✅ 已加入绘本，已智能过滤无意义随机字母组合。';
+        ocrStatusText.textContent = '✅ 已加入绘本，图片已开始异步上传至云端。';
         closeAddModal();
         renderAll(true);
     });
@@ -4514,13 +4854,45 @@
         return chunks.length ? chunks : [serializeNode(cleanNode)];
     }
 
+    async function uploadHtmlFileToCos(fileName, source) {
+        if (!source || !String(fileName || '').trim()) return null;
+        try {
+            const response = await fetch(API_BASE + '/upload/html', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + __authToken
+                },
+                body: JSON.stringify({ fileName: fileName || 'page.html', source })
+            });
+            if (!response.ok) return null;
+            const data = await response.json();
+            return (data && data.ok && data.url) ? { key: data.key, url: data.url } : null;
+        } catch (error) {
+            console.warn('HTML 上传失败，回退到本地读取：', error);
+            return null;
+        }
+    }
+
     async function analyzeHtmlFiles(files, onProgress) {
         const htmlFiles = Array.from(files).filter(file => /\.html?$/i.test(file.name));
         const groupsByName = new Map();
         for (let fileIndex = 0; fileIndex < htmlFiles.length; fileIndex++) {
             const file = htmlFiles[fileIndex];
             onProgress?.(fileIndex, htmlFiles.length, file.name, '正在读取');
-            const source = await readFileText(file);
+            const rawSource = await readFileText(file);
+            const uploaded = await uploadHtmlFileToCos(file.name, rawSource);
+            let source = rawSource;
+            if (uploaded && uploaded.url) {
+                try {
+                    const serverResponse = await fetch(uploaded.url);
+                    if (serverResponse.ok) {
+                        source = await serverResponse.text();
+                    }
+                } catch (error) {
+                    console.warn('HTML 从服务器读取失败，使用本地版本：', error);
+                }
+            }
             const doc = new DOMParser().parseFromString(source, 'text/html');
             let pageNodes = Array.from(doc.querySelectorAll('[data-page], .page, section'));
             if (pageNodes.length === 0) pageNodes = [doc.body || doc.documentElement];
@@ -4538,7 +4910,14 @@
                 contentChunks.forEach((html, chunkIndex) => {
                     const textDoc = new DOMParser().parseFromString(html, 'text/html');
                     const text = (textDoc.body?.textContent || '').replace(/\s+/g, ' ').trim();
-                    group.pages.push({ file, pageNumber: htmlPageNumber(file.name) || index + 1, order: index * 10000 + chunkIndex, text, html: htmlPageShell(html, source) });
+                    group.pages.push({
+                        file,
+                        pageNumber: htmlPageNumber(file.name) || index + 1,
+                        order: index * 10000 + chunkIndex,
+                        text,
+                        html: htmlPageShell(html, source),
+                        htmlCosKey: uploaded?.key || null
+                    });
                 });
             }
             onProgress?.(fileIndex + 1, htmlFiles.length, file.name, '分析完成');
@@ -4609,6 +4988,7 @@
 
     function setImportComplete() {
         importCompleted = true;
+        batchProgressHeader.classList.add('import-complete');
         batchProgressTitle.textContent = '✅ 导入完成！';
         batchProgressHeader.style.background = 'var(--leaf)';
         progressFill.classList.add('complete');
@@ -4632,6 +5012,7 @@
         importCompleted = false;
         batchRunning = false;
         batchCancelFlag = false;
+        batchProgressHeader.classList.remove('import-complete');
         progressFill.classList.remove('complete');
         batchProgressTitle.textContent = '📦 批量导入中...';
         batchProgressHeader.style.background = '';
@@ -4774,6 +5155,7 @@
                 };
 
                 const pageItems = [];
+                const cosUploadItems = []; // 本绘本待上传到 COS 的图片
                 for (let pIdx = 0; pIdx < group.pages.length; pIdx++) {
                     if (batchCancelFlag) break;
                     const { file } = group.pages[pIdx];
@@ -4829,6 +5211,7 @@
                         file: item.file.name,
                         text: text
                     });
+                    cosUploadItems.push({ file: item.file.name, dataUrl: item.dataUrl });
                     processed++;
                     const logText = text ? '→ "' + text.substring(0, 30) + (text.length > 30 ? '...' : '') + '"' : '(无文字)';
                     logProgress(`  ✅ 第 ${pIdx+1} 页: ${item.file.name} ${logText}`);
@@ -4849,6 +5232,19 @@
                     }
 
                     logProgress(`✅ 绘本 "${group.displayName}" 导入成功 (${newStory.pages.length} 页)`);
+
+                    // 异步上传本绘本全部图片到 COS，成功后回填 cosKey（不阻塞导入进度）
+                    uploadPagesToCos(cosUploadItems).then(results => {
+                        const storyNow = findNodeById(library, nid);
+                        if (!storyNow || !storyNow.pages) return;
+                        let changed = false;
+                        for (const r of results) {
+                            if (!r.cosKey) continue;
+                            const page = storyNow.pages.find(p => p.file === r.file);
+                            if (page && !page.cosKey) { page.cosKey = r.cosKey; changed = true; }
+                        }
+                        if (changed) saveLibrary();
+                    }).catch(() => {});
                 } else if (batchCancelFlag) {
                     break;
                 } else {
@@ -4880,7 +5276,7 @@
                 const allStories = getAllStories(library);
                 if (allStories.length > 0) {
                     currentStoryId = allStories[allStories.length - 1].id;
-                    localStorage.setItem('wib:currentStoryId', currentStoryId);
+                    localStorage.setItem(CURRENT_STORY_KEY, currentStoryId);
                     currentSpread = 0;
                 }
                 renderAll(true);
@@ -4985,7 +5381,12 @@
                 }
                 const story = { id: genId(), type: 'story', title: group.name, builtin: false, pages: [], sortKey: Infinity };
                 group.pages.forEach(page => {
-                    story.pages.push({ file: page.file.name, text: page.text, html: page.html });
+                    story.pages.push({
+                        file: page.file.name,
+                        text: page.text,
+                        html: page.html,
+                        htmlCosKey: page.htmlCosKey || null
+                    });
                     processed++;
                     logProgress(`  ✅ 第 ${story.pages.length} 页: ${page.file.name}${page.text ? ' → "' + page.text.substring(0, 30) + (page.text.length > 30 ? '...' : '') + '"' : '（无文字）'}`);
                 });
@@ -5002,19 +5403,21 @@
                 processedCountEl.textContent = processed;
             }
             sortNodes(parentNodes);
-            saveLibrary();
             if (generatedStoryIds.length > 0) {
                 currentStoryId = generatedStoryIds[generatedStoryIds.length - 1];
                 currentSpread = 0;
-                localStorage.setItem('wib:currentStoryId', currentStoryId);
-                renderAll(false);
+                localStorage.setItem(CURRENT_STORY_KEY, currentStoryId);
             }
+            await saveLibrary();
+            renderAll(false);
             if (batchCancelFlag) {
                 logProgress('⏹️ 生成已取消，部分绘本可能已生成');
+                batchProgressHeader.classList.remove('import-complete');
                 batchProgressTitle.textContent = '⏹️ 生成已取消';
                 batchProgressHeader.style.background = 'var(--danger)';
             } else {
                 logProgress(`🎉 一键生成完成！成功生成 ${successCount} 个绘本`);
+                batchProgressHeader.classList.add('import-complete');
                 batchProgressTitle.textContent = '✅ 一键生成完成！';
                 batchProgressHeader.style.background = 'var(--leaf)';
                 importCompleted = true;
@@ -5159,21 +5562,25 @@
        ===================================================================== */
     const dirModalOverlay = document.getElementById('dirModalOverlay');
     const dirInput = document.getElementById('dirInput');
+    const htmlDirInput = document.getElementById('htmlDirInput');
     const dirPickBtn = document.getElementById('dirPickBtn');
+    const htmlDirPickBtn = document.getElementById('htmlDirPickBtn');
     const confirmDirBtn = document.getElementById('confirmDirBtn');
+    const confirmHtmlDirBtn = document.getElementById('confirmHtmlDirBtn');
     const cancelDirBtn = document.getElementById('cancelDirBtn');
     const closeDirModalBtn = document.getElementById('closeDirModalBtn');
     const dirSettingBtn = document.getElementById('dirSettingBtn');
 
     function openDirModal() {
         dirInput.value = imgDir;
+        htmlDirInput.value = htmlDir;
         dirModalOverlay.classList.add('open');
         setTimeout(() => dirInput.focus(), 50);
     }
 
     function closeDirModal() { dirModalOverlay.classList.remove('open'); }
 
-    function pickFolder() {
+    function pickFolderFor(targetInput, targetKey, label) {
         const input = document.createElement('input');
         input.type = 'file';
         input.webkitdirectory = true;
@@ -5192,14 +5599,19 @@
                     dirPath = dirPath.replace(/\\/g, '/');
                 }
                 if (dirPath) {
-                    if (!dirPath.endsWith('/')) dirPath += '/';
-                    dirInput.value = dirPath;
-                    imgDir = dirPath;
-                    localStorage.setItem(LS_DIR_KEY, imgDir);
+                    dirPath = normalizeDirValue(dirPath);
+                    targetInput.value = dirPath;
+                    if (targetKey === 'img') {
+                        imgDir = dirPath;
+                        localStorage.setItem(LS_DIR_KEY, imgDir);
+                    } else {
+                        htmlDir = dirPath;
+                        localStorage.setItem(LS_HTML_DIR_KEY, htmlDir);
+                    }
                     saveLibrary();
                     closeDirModal();
                     renderAll(false);
-                    alert('✅ 图片目录已更新为：' + dirPath + '\n绘本页面将重新加载。');
+                    alert(`✅ ${label} 已更新为：${dirPath}\n绘本页面将重新加载。`);
                 } else {
                     alert('无法自动提取目录路径（浏览器安全限制），请手动输入完整路径。');
                 }
@@ -5209,20 +5621,30 @@
         input.click();
     }
 
-    dirPickBtn.addEventListener('click', pickFolder);
+    dirPickBtn.addEventListener('click', () => pickFolderFor(dirInput, 'img', '图片目录'));
+    htmlDirPickBtn.addEventListener('click', () => pickFolderFor(htmlDirInput, 'html', 'HTML 目录'));
     dirSettingBtn.addEventListener('click', openDirModal);
     closeDirModalBtn.addEventListener('click', closeDirModal);
     cancelDirBtn.addEventListener('click', closeDirModal);
     dirModalOverlay.addEventListener('click', (e) => { if (e.target === dirModalOverlay) closeDirModal(); });
     dirInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') confirmDirBtn.click(); });
+    htmlDirInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') confirmHtmlDirBtn.click(); });
 
     confirmDirBtn.addEventListener('click', () => {
         let v = dirInput.value.trim();
         if (!v) { dirInput.focus(); return; }
-        v = v.replace(/\\/g, '/');
-        if (!v.endsWith('/')) v += '/';
-        imgDir = v;
+        imgDir = normalizeDirValue(v);
         localStorage.setItem(LS_DIR_KEY, imgDir);
+        saveLibrary();
+        closeDirModal();
+        renderAll(false);
+    });
+
+    confirmHtmlDirBtn.addEventListener('click', () => {
+        let v = htmlDirInput.value.trim();
+        if (!v) { htmlDirInput.focus(); return; }
+        htmlDir = normalizeDirValue(v);
+        localStorage.setItem(LS_HTML_DIR_KEY, htmlDir);
         saveLibrary();
         closeDirModal();
         renderAll(false);
@@ -5477,21 +5899,63 @@ function ensureSortKeys(nodes) {
 ensureSortKeys(library);
 sortNodes(library);
 
-// 默认不选中任何绘本
-currentStoryId = null;
-localStorage.removeItem('wib:currentStoryId');
+// 页面首次打开时不自动选中绘本，也不自动朗读；必须由用户点击某本绘本后才显示内容。
+if (!selectedFolderId) {
+    const rootFolder = getDefaultSelectedFolderId();
+    if (rootFolder) selectedFolderId = rootFolder;
+}
+if (currentStoryId) {
+    localStorage.setItem(CURRENT_STORY_KEY, currentStoryId);
+}
 
-renderAll(false); // 初始化不播放语音
+renderAll(false);
 </script>
 <script>
     (() => {
-        const username = localStorage.getItem('tappyread_last_user') || '当前用户';
+        const username = localStorage.getItem('tappyread_username') || localStorage.getItem('tappyread_last_user') || '当前用户';
         document.getElementById('accountName').textContent = username;
         document.getElementById('logoutBtn').addEventListener('click', async () => {
-            const token = localStorage.getItem('tappyread_auth_token');
-            try { await fetch('/api/auth/logout', { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, credentials: 'include' }); } catch (error) {}
-            localStorage.removeItem('tappyread_auth_token');
+            if ('speechSynthesis' in window) {
+                try { speechSynthesis.cancel(); } catch (error) {}
+                try { speechSessionId++; } catch (error) {}
+            }
+            if (window && window.speechSynthesis && typeof window.speechSynthesis.cancel === 'function') {
+                try { window.speechSynthesis.cancel(); } catch (error) {}
+            }
+            const token = localStorage.getItem(AUTH_TOKEN_KEY);
+            const userId = localStorage.getItem(USER_ID_KEY) || localStorage.getItem('tappyread_user_id');
+            try {
+                const snapshot = snapshotLibraryState();
+                if (userId) {
+                    const scope = ':' + userId;
+                    const snapshotKey = 'wib:library:v26' + scope;
+                    localStorage.setItem(snapshotKey, JSON.stringify({ tree: snapshot.tree, collapsed: snapshot.collapsed }));
+                    if (snapshot.selectedFolderId) localStorage.setItem('wib:selectedFolder' + scope, snapshot.selectedFolderId);
+                    else localStorage.removeItem('wib:selectedFolder' + scope);
+                    if (snapshot.currentStoryId) localStorage.setItem('wib:currentStoryId' + scope, snapshot.currentStoryId);
+                    else localStorage.removeItem('wib:currentStoryId' + scope);
+                    localStorage.setItem('wib:collapsed_v2' + scope, JSON.stringify(snapshot.collapsed));
+                }
+                const saved = await saveLibrary();
+                if (!saved && token) {
+                    await fetch('/api/library', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                        credentials: 'include',
+                        body: JSON.stringify(snapshotLibraryState())
+                    }).catch(() => {});
+                }
+                if (token) {
+                    await fetch('/api/auth/logout', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, credentials: 'include' }).catch(() => {});
+                }
+            } catch (error) {
+                console.warn('退出前同步目录失败，继续登出', error);
+            }
+            localStorage.removeItem(AUTH_TOKEN_KEY);
+            localStorage.removeItem('tappyread_username');
             localStorage.removeItem('tappyread_last_user');
+            localStorage.removeItem(USER_ID_KEY);
+            localStorage.removeItem('tappyread_user_id');
             window.location.href = 'index.html';
         });
     })();

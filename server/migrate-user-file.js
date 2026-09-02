@@ -21,11 +21,10 @@ async function main() {
     : rows.map(parseCsvRow).map(values => ({ username: values[0], password: values[1] }));
 
   for (const account of accounts.filter(item => item.username && item.password && item.username !== 'username')) {
-    const passwordHash = await bcrypt.hash(account.password, 12);
     await pool.execute(
-      `INSERT INTO users (username, password_hash) VALUES (?, ?)
-       ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash)`,
-      [account.username, passwordHash]
+      `INSERT INTO users (username, password) VALUES (?, ?)
+       ON DUPLICATE KEY UPDATE password = VALUES(password)`,
+      [account.username, account.password]
     );
     console.log(`已导入账号: ${account.username}`);
   }

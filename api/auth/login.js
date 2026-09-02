@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import mysql from 'mysql2/promise';
+import bcrypt from 'bcryptjs';
 
 let pool;
 
@@ -34,10 +35,17 @@ export default async function handler(req, res) {
     const username = String(req.body?.username || '').trim();
     const password = String(req.body?.password || '');
     const [rows] = await getPool().execute(
-      'SELECT id, username FROM users WHERE username = ? AND password = ? LIMIT 1',
-      [username, password]
+      'SELECT id, username, password FROM users WHERE username = ? LIMIT 1',
+      [username]
     );
     if (!rows.length) return sendJson(res, 401, { error: '用户名或密码错误，请重试' });
+
+    const storedPassword = String(rows[0].password || '');
+    const matches = storedPassword.startsWith('$2')
+      ? await bcrypt.compare(password, storedPassword)
+      : storedPassword === password;
+
+    if (!matches) return sendJson(res, 401, { error: '用户名或密码错误，请重试' });
 
     const token = crypto.randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + Number(process.env.SESSION_DAYS || 7) * 86400000);
@@ -46,7 +54,7 @@ export default async function handler(req, res) {
       [hashToken(token), rows[0].id, expiresAt]
     );
     res.setHeader('Set-Cookie', `tappyread_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${Number(process.env.SESSION_DAYS || 7) * 86400}`);
-    sendJson(res, 200, { token, username: rows[0].username });
+    sendJson(res, 200, { token, username: rows[0].username, userId: rows[0].id });
   } catch (error) {
     console.error('Vercel login error:', error);
     sendJson(res, 500, { error: '登录服务暂时不可用，请检查云数据库配置' });

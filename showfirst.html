@@ -726,12 +726,43 @@
 
 <script>
     (() => {
-        document.getElementById('accountName').textContent = localStorage.getItem('tappyread_last_user') || '当前用户';
+        document.getElementById('accountName').textContent = localStorage.getItem('tappyread_username') || localStorage.getItem('tappyread_last_user') || '当前用户';
         document.getElementById('logoutBtn').addEventListener('click', async () => {
             const token = localStorage.getItem('tappyread_auth_token');
-            try { await fetch('/api/auth/logout', { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, credentials: 'include' }); } catch (error) {}
+            const userId = localStorage.getItem('tappyread_user_id');
+            try {
+                if (userId) {
+                    const scope = ':' + userId;
+                    const raw = localStorage.getItem('wib:library:v26' + scope);
+                    const snapshot = raw ? JSON.parse(raw) : null;
+                    const tree = snapshot && Array.isArray(snapshot.tree) ? snapshot.tree : [];
+                    const collapsed = Array.isArray(snapshot && snapshot.collapsed) ? snapshot.collapsed : [];
+                    const selectedFolderId = localStorage.getItem('wib:selectedFolder' + scope) || null;
+                    const currentStoryId = localStorage.getItem('wib:currentStoryId' + scope) || null;
+                    if (tree.length || collapsed.length || selectedFolderId || currentStoryId) {
+                        await fetch('/api/library', {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json', Authorization: token ? `Bearer ${token}` : '' },
+                            credentials: 'include',
+                            body: JSON.stringify({
+                                tree,
+                                collapsed,
+                                selectedFolderId,
+                                currentStoryId
+                            })
+                        });
+                    }
+                }
+                if (token) {
+                    await fetch('/api/auth/logout', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, credentials: 'include' }).catch(() => {});
+                }
+            } catch (error) {
+                console.warn('退出前同步目录失败，继续登出', error);
+            }
             localStorage.removeItem('tappyread_auth_token');
+            localStorage.removeItem('tappyread_username');
             localStorage.removeItem('tappyread_last_user');
+            localStorage.removeItem('tappyread_user_id');
             window.location.href = 'index.html';
         });
     })();

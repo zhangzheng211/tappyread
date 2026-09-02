@@ -486,6 +486,9 @@
                 }
 
                 localStorage.setItem(AUTH_TOKEN_KEY, loginData.token);
+                // 保存当前登录用户名与用户 ID：绘本目录等数据按用户 ID 隔离存储，账户信息必须显示当前登录用户
+                if (loginData.userId) localStorage.setItem('tappyread_user_id', loginData.userId);
+                if (loginData.username) localStorage.setItem('tappyread_username', loginData.username);
 
                 if (rememberUser.checked) {
                     localStorage.setItem('tappyread_last_user', username);
@@ -510,12 +513,16 @@
                     const data = await response.json();
                     if (!response.ok || !data.token) throw new Error(data.error || '注册失败');
                     localStorage.setItem(AUTH_TOKEN_KEY, data.token);
+                    // 保存当前登录用户名与用户 ID：绘本目录等数据按用户 ID 隔离存储，账户信息必须显示当前登录用户
+                    if (data.userId) localStorage.setItem('tappyread_user_id', data.userId);
+                    if (data.username) localStorage.setItem('tappyread_username', data.username);
                     localStorage.setItem('tappyread_last_user', username);
                     rememberUser.checked = true;
                     setError('✅ 注册成功，正在进入首页...', true);
                     setTimeout(redirectToMainPage, 400);
                 } catch (error) {
-                    setError(`❌ ${error.message}`);
+                    const message = error.message || '注册失败';
+                    setError(message === '用户名已存在，请修改用户名重试！' ? message : `❌ ${message}`);
                 } finally {
                     registerBtn.disabled = false;
                 }

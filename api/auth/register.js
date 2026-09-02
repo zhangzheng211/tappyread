@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import mysql from 'mysql2/promise';
+import bcrypt from 'bcryptjs';
 
 let pool;
 function getPool() {
@@ -20,14 +21,15 @@ export default async function handler(req, res) {
     const username = String(req.body?.username || '').trim();
     const password = String(req.body?.password || '');
     if (!username || !password) return sendJson(res, 400, { error: '用户名和密码不能为空' });
-    const [result] = await getPool().execute('INSERT INTO users (username, password) VALUES (?, ?)', [username, password]);
+    const passwordHash = await bcrypt.hash(password, 12);
+    const [result] = await getPool().execute('INSERT INTO users (username, password) VALUES (?, ?)', [username, passwordHash]);
     const token = crypto.randomBytes(32).toString('hex');
     const days = Number(process.env.SESSION_DAYS || 7);
     await getPool().execute('INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)', [hashToken(token), result.insertId, new Date(Date.now() + days * 86400000)]);
     res.setHeader('Set-Cookie', `tappyread_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${days * 86400}`);
-    return sendJson(res, 201, { token, username });
+    return sendJson(res, 201, { token, username, userId: result.insertId });
   } catch (error) {
-    if (error.code === 'ER_DUP_ENTRY') return sendJson(res, 409, { error: '用户名已存在' });
+    if (error.code === 'ER_DUP_ENTRY') return sendJson(res, 409, { error: '用户名已存在，请修改用户名重试！' });
     console.error('Vercel register error:', error);
     return sendJson(res, 500, { error: '注册服务暂时不可用，请检查云数据库配置' });
   }
