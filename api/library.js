@@ -130,6 +130,67 @@ async function getLatestLibraryFromCos(username) {
   }
 }
 
+function sendCosConfigError(res) {
+  return sendJson(res, 503, {
+    error: 'COS 未配置：请在 Vercel 项目的 Environment Variables 中填写 COS_SECRET_ID 与 COS_SECRET_KEY，然后重新部署（Redeploy）'
+  });
+}
+
+function putCosTextObject(key, text, contentType = 'application/json; charset=utf-8') {
+  return new Promise((resolve, reject) => {
+    if (!cosClient) return reject(new Error('COS 未配置'));
+    cosClient.putObject({
+      Bucket: COS_BUCKET,
+      Region: COS_REGION,
+      Key: key,
+      Body: Buffer.from(text, 'utf8'),
+      ContentType: contentType
+    }, (err, data) => (err ? reject(err) : resolve(data)));
+  });
+}
+
+function deleteCosObjects(keys) {
+  return new Promise((resolve, reject) => {
+    if (!cosClient || !keys.length) return resolve(null);
+    cosClient.deleteMultipleObject({
+      Bucket: COS_BUCKET,
+      Region: COS_REGION,
+      Objects: keys.map(Key => ({ Key }))
+    }, (err, data) => (err ? reject(err) : resolve(data)));
+  });
+}
+
+// 把当前用户的绘本目录写入腾讯云 COS 的 json/{username}.json（此前这里只做了参数
+// 校验就直接返回 { ok:true }，并没有真正调用 COS 的 putObject，导致本地 Express
+// 服务器（server/server.js）保存正常，但部署到 Vercel 后台目录数据其实从未被写入
+// COS，只是接口“假装”成功了。现在补上和 server/server.js 完全一致的真实上传逻辑。
+async function syncLibraryToCos(username, snapshot) {
+  if (!cosConfigured || !username) return null;
+  const safeUsername = sanitizeUsername(username).replace(/_+$/g, '') || 'guest';
+  const canonicalKey = `${COS_JSON_DIR}/${safeUsername}.json`;
+  const payload = {
+    username,
+    updatedAt: new Date().toISOString(),
+    tree: Array.isArray(snapshot?.tree) ? snapshot.tree : [],
+    collapsed: Array.isArray(snapshot?.collapsed) ? snapshot.collapsed : [],
+    selectedFolderId: snapshot?.selectedFolderId || null,
+    currentStoryId: snapshot?.currentStoryId || null
+  };
+
+  await putCosTextObject(canonicalKey, JSON.stringify(payload, null, 2), 'application/json; charset=utf-8');
+
+  // 顺手清理掉这个用户名下的旧版/重复命名文件，避免 json/ 目录越堆越多
+  try {
+    const allKeys = await listCosKeys(`${COS_JSON_DIR}/`);
+    const staleKeys = getLegacyLibraryKeysForUsername(username, allKeys).filter(key => key !== canonicalKey);
+    if (staleKeys.length) await deleteCosObjects(staleKeys.slice(0, 50));
+  } catch (cleanupError) {
+    console.warn('清理旧版绘本目录文件失败（不影响本次保存）:', cleanupError);
+  }
+
+  return { key: canonicalKey, url: COS_BASE_URL + canonicalKey };
+}
+
 export default async function handler(req, res) {
   try {
     const user = await authenticate(req);
@@ -150,9 +211,17 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'PUT') {
+      if (!cosConfigured) return sendCosConfigError(res);
       const { tree, collapsed } = req.body || {};
       if (!Array.isArray(tree) || !Array.isArray(collapsed)) return sendJson(res, 400, { error: '目录数据格式错误' });
-      return sendJson(res, 200, { ok: true });
+      const result = await syncLibraryToCos(user.username, {
+        tree,
+        collapsed,
+        selectedFolderId: req.body.selectedFolderId || null,
+        currentStoryId: req.body.currentStoryId || null
+      });
+      if (!result) return sendJson(res, 500, { error: '同步用户绘本目录到 COS 失败' });
+      return sendJson(res, 200, { ok: true, key: result.key, url: result.url });
     }
     return sendJson(res, 405, { error: '请求方法不允许' });
   } catch (error) {
