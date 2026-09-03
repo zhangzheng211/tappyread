@@ -1077,6 +1077,24 @@
             .help-modal .modal-box{ max-width:95vw; max-height:95vh; }
             .help-content .shortcut-grid{ grid-template-columns:1fr; }
         }
+
+        /* ===== 修复全屏模式下单词卡被裁剪/遮挡问题 ===== */
+.tappy-word-card,
+.ocr-overlay .tappy-word-card,
+.html-page-box .tappy-word-card {
+    position: fixed !important;
+    z-index: 2147483647 !important;
+    pointer-events: none !important;
+    transform: translateY(0) scale(1) !important; /* 强制覆盖 transform */
+}
+
+/* 移除全屏容器的 overflow 限制，防止卡片跑出边界被切掉 */
+.stage-wrap:fullscreen,
+.stage-wrap:-webkit-full-screen,
+body.reader-fullscreen .stage-wrap {
+    overflow: visible !important;
+}
+
     </style>
     <style>
         .account-menu{position:fixed;right:18px;top:76px;z-index:10000}
@@ -1120,7 +1138,11 @@
             </div>
             <button class="search-btn" id="searchBtn">🔍 搜索</button>
         </div>
-        <div class="tree" id="tree"></div>
+        <div class="tree" id="tree">
+    <div class="loading-hint" id="treeLoadingHint" style="padding:20px 10px; text-align:center; font-size:14px; color:var(--tent-navy); font-weight:700;">
+        ⏳ 请稍后！绘本目录加载中......
+    </div>
+</div>
     </aside>
 
     <div class="main">
@@ -2058,7 +2080,7 @@
         return true;
     }
 
-    async function saveLibrary(){
+        async function saveLibrary(){
         try{
             const snapshot = snapshotLibraryState();
             const safeCache = {
@@ -2076,6 +2098,8 @@
                 else localStorage.removeItem(CURRENT_STORY_KEY);
             } catch (localErr) {
                 console.warn('本地缓存写入超出容量，继续保留云端同步', localErr);
+                // 如果 localStorage 满了，尝试清理掉本地的图片缓存腾出空间
+                try { localStorage.removeItem(IMAGE_CACHE_KEY); } catch (cleanErr) {}
             }
             const token = localStorage.getItem(AUTH_TOKEN_KEY);
             if(token){
@@ -2099,22 +2123,9 @@
     }
 
     function loadLibraryData(){
-        try{
-            const raw = localStorage.getItem(LS_LIB_KEY);
-            if(!raw) return null;
-            const data = JSON.parse(raw);
-            if(!data || !data.tree || !Array.isArray(data.tree)) return null;
-            return {
-                tree: data.tree,
-                collapsed: Array.isArray(data.collapsed) ? data.collapsed : [],
-                selectedFolderId: data.selectedFolderId || null,
-                currentStoryId: data.currentStoryId || null
-            };
-        }catch(err){ 
-            console.warn('加载缓存失败', err);
-            return null;
-        }
-    }
+    // 完全禁止从本地缓存读取
+    return null;
+}
 
     function loadCollapsedState(){
         try{
@@ -2172,79 +2183,104 @@
         }
     }
 
-    async function loadRemoteLibrary(){
-        const token = localStorage.getItem(AUTH_TOKEN_KEY);
-        if(!token){
+    /* =====================================================================
+   加载状态控制
+   ===================================================================== */
+    function showTreeLoading(show) {
+    const hint = document.getElementById('treeLoadingHint');
+    const tree = document.getElementById('tree');
+    if (!hint || !tree) return;
+    
+    if (show) {
+        hint.style.display = 'block';
+        // 清空树的内容，只显示加载提示
+        tree.innerHTML = '';
+        tree.appendChild(hint);
+    } else {
+        hint.style.display = 'none';
+    }
+    }
+
+    async function loadRemoteLibrary()
+    {
+    const token = localStorage.getItem(AUTH_TOKEN_KEY);
+    if(!token){
+        location.replace('index.html');
+        return;
+            }
+    
+    // 显示加载状态
+    showTreeLoading(true);
+    
+    try{
+        const response = await fetch(`${API_BASE}/library`, {
+            headers: { Authorization: `Bearer ${token}` },
+            credentials: 'include'
+        });
+        if(response.status === 401){
+            localStorage.removeItem(AUTH_TOKEN_KEY);
+            localStorage.removeItem(USER_ID_KEY);
+            localStorage.removeItem('tappyread_last_user');
             location.replace('index.html');
             return;
         }
-        try{
-            const response = await fetch(`${API_BASE}/library`, {
-                headers: { Authorization: `Bearer ${token}` },
-                credentials: 'include'
-            });
-            if(response.status === 401){
-                // 登录已过期：清除本账号凭据并回登录页重新登录
-                localStorage.removeItem(AUTH_TOKEN_KEY);
-                localStorage.removeItem(USER_ID_KEY);
-                localStorage.removeItem('tappyread_last_user');
-                location.replace('index.html');
-                return;
-            }
-            if(!response.ok) throw new Error(`目录加载失败: ${response.status}`);
-            const data = await response.json();
-            const localData = loadLibraryData();
-            const localTree = localData && Array.isArray(localData.tree) ? localData.tree : [];
-            const localHasData = localTree.length > 0;
-
-            if(!Array.isArray(data.tree) || !data.tree.length){
-                if(localHasData){
-                    applyLibrarySnapshot(localData);
-                    if (!hasExplicitStorySelection) {
-                        currentStoryId = null;
-                        localStorage.removeItem(CURRENT_STORY_KEY);
-                    }
-                    if (!selectedFolderId && library.length > 0) {
-                        const rootFolder = library.find(node => node && node.type === 'folder');
-                        if (rootFolder) {
-                            selectedFolderId = rootFolder.id;
-                        }
-                    }
-                    saveLibrary();
-                    renderTree();
-                    renderAll(false);
-                }
-                return;
-            }
-            applyLibrarySnapshot({
-                tree: data.tree,
-                collapsed: Array.isArray(data.collapsed) ? data.collapsed : [],
-                selectedFolderId: data.selectedFolderId || null,
-                currentStoryId: data.currentStoryId || null
-            });
-            if (!hasExplicitStorySelection) {
-                currentStoryId = null;
-                localStorage.removeItem(CURRENT_STORY_KEY);
-            }
-            if (!selectedFolderId && library.length > 0) {
-                const rootFolder = library.find(node => node && node.type === 'folder');
-                if (rootFolder) {
-                    selectedFolderId = rootFolder.id;
-                }
-            }
+        if(!response.ok) throw new Error(`目录加载失败: ${response.status}`);
+        const data = await response.json();
+        
+        // 直接使用服务器数据
+        if(Array.isArray(data.tree) && data.tree.length > 0){
+            library = data.tree;
+            collapsedNodes = new Set(Array.isArray(data.collapsed) ? data.collapsed : []);
+            selectedFolderId = data.selectedFolderId || null;
+            currentStoryId = data.currentStoryId || null;
+        } else {
+            library = [];
+            collapsedNodes = new Set();
+            selectedFolderId = null;
+            currentStoryId = null;
+        }
+        
+        // 同步到本地缓存
+        try {
             localStorage.setItem(LS_LIB_KEY, JSON.stringify({
                 tree: compactLibraryForLocalStorage(library),
                 collapsed: [...collapsedNodes],
                 selectedFolderId: selectedFolderId || null,
                 currentStoryId: currentStoryId || null
             }));
-            renderTree();
-            renderAll(false);
-        }catch(error){
-            console.warn('加载账号绘本目录失败，继续使用本地缓存', error);
+            if(selectedFolderId) localStorage.setItem(LS_FOLDER_KEY, selectedFolderId);
+            else localStorage.removeItem(LS_FOLDER_KEY);
+            if(currentStoryId) localStorage.setItem(CURRENT_STORY_KEY, currentStoryId);
+            else localStorage.removeItem(CURRENT_STORY_KEY);
+            localStorage.setItem(LS_COLLAPSED_KEY, JSON.stringify([...collapsedNodes]));
+        } catch(e) {}
+        
+        // 默认选中第一个文件夹
+        if (!selectedFolderId && library.length > 0) {
+            const rootFolder = library.find(node => node && node.type === 'folder');
+            if (rootFolder) {
+                selectedFolderId = rootFolder.id;
+            }
+        }
+        
+        // 隐藏加载状态，渲染树
+        showTreeLoading(false);
+        renderTree();
+        renderAll(false);
+    }catch(error){
+        console.error('加载绘本目录失败，请检查网络', error);
+        // 网络失败时显示空状态，不使用本地缓存
+        library = [];
+        collapsedNodes = new Set();
+        selectedFolderId = null;
+        currentStoryId = null;
+        showTreeLoading(false);
+        renderTree();
+        renderAll(false);
+        console.warn('⚠️ 无法连接服务器，请刷新重试');
         }
     }
-    loadRemoteLibrary();
+    // loadRemoteLibrary();
 
     /* =====================================================================
        ===== 工具函数 =====
@@ -2585,16 +2621,19 @@
         reader.readAsText(file);
     }
 
-    // 在页面加载时尝试恢复图片缓存
-    function restoreImageCache() {
+        function restoreImageCache() {
         try {
             const cached = localStorage.getItem(IMAGE_CACHE_KEY);
             if (cached) {
                 const data = JSON.parse(cached);
-                if (typeof data === 'object') {
+                // 限制恢复的数据量，防止加载卡顿或爆满
+                if (typeof data === 'object' && Object.keys(data).length < 20) {
                     Object.keys(data).forEach(key => {
                         sessionSrcCache[key] = data[key];
                     });
+                } else {
+                    // 如果以前存了太多图片数据，直接清理掉，让程序重新从 CDN 加载
+                    localStorage.removeItem(IMAGE_CACHE_KEY);
                 }
             }
         } catch(e) {}
@@ -3015,28 +3054,69 @@
         }
     }
 
-    function speakOne(text, indicatorEl){
-        if(!('speechSynthesis' in window) || !text) return;
-        const token = ++speechSessionId;
+    // 语音朗读（支持点击切换播放/停止）
+let isSpeaking = false;
+let currentUtterance = null;
+
+function speakOne(text, indicatorEl) {
+    if (!('speechSynthesis' in window) || !text) return;
+    
+    // 如果当前正在朗读同一个文本，则停止
+    if (isSpeaking && currentUtterance) {
         stopSpeechSoft();
-        const utter = makeUtterance(text);
-        const finalize = ()=> {
-            if(token !== speechSessionId) return;
-            if(indicatorEl) indicatorEl.classList.remove('speaking');
-        };
-        if(indicatorEl){
-            utter.onstart = ()=> {
-                if(token === speechSessionId) indicatorEl.classList.add('speaking');
-            };
-            utter.onend = finalize;
-            utter.onerror = finalize;
-        }
-        try {
-            speechSynthesis.speak(utter);
-        } catch (error) {
-            if(indicatorEl) indicatorEl.classList.remove('speaking');
-        }
+        if (indicatorEl) indicatorEl.classList.remove('speaking');
+        return;
     }
+    
+    const token = ++speechSessionId;
+    stopSpeechSoft();
+    const utter = makeUtterance(text);
+    currentUtterance = utter;
+    isSpeaking = true;
+    
+    const finalize = function() {
+        if (token !== speechSessionId) return;
+        isSpeaking = false;
+        currentUtterance = null;
+        if (indicatorEl) indicatorEl.classList.remove('speaking');
+    };
+    
+    if (indicatorEl) {
+        utter.onstart = function() {
+            if (token === speechSessionId) {
+                indicatorEl.classList.add('speaking');
+            }
+        };
+        utter.onend = finalize;
+        utter.onerror = finalize;
+    } else {
+        utter.onend = function() {
+            isSpeaking = false;
+            currentUtterance = null;
+        };
+        utter.onerror = function() {
+            isSpeaking = false;
+            currentUtterance = null;
+        };
+    }
+    
+    try {
+        speechSynthesis.speak(utter);
+    } catch (error) {
+        isSpeaking = false;
+        currentUtterance = null;
+        if (indicatorEl) indicatorEl.classList.remove('speaking');
+    }
+}
+
+function stopSpeechSoft() {
+    isSpeaking = false;
+    currentUtterance = null;
+    if ('speechSynthesis' in window) {
+        try { speechSynthesis.cancel(); } catch (error) { /* noop */ }
+        try { if (typeof speechSynthesis.resume === 'function') speechSynthesis.resume(); } catch (error) { /* noop */ }
+    }
+}
 
     function speakSequence(items){
         if(!('speechSynthesis' in window) || !items.length) return;
@@ -3146,7 +3226,7 @@
                 if(!document.getElementById('tappy-word-card-style')){
                     const style = document.createElement('style');
                     style.id = 'tappy-word-card-style';
-                    style.textContent = '.tappy-word-card{position:fixed;z-index:9999;display:flex;flex-direction:column;gap:2px;min-width:180px;max-width:240px;padding:10px 14px;border:3px solid #26296b;border-radius:16px;background:#fff8dc;color:#26296b;box-shadow:4px 5px 0 #f07855,0 8px 18px rgba(38,41,107,.22);font-family:Arial,sans-serif;opacity:0;transform:translateY(5px) scale(.94);pointer-events:none;transition:opacity .15s,transform .15s}.tappy-word-card.visible{opacity:1;transform:translateY(0) scale(1)}.tappy-word-card strong{font-size:20px;color:#e45d3f}.tappy-word-card span{font-size:14px}.tappy-word-card b{align-self:flex-start;padding:2px 8px;border-radius:999px;background:#bcebd5;color:#23734b;font-size:12px}';
+                    style.textContent = '.tappy-word-card{position:fixed;z-index:2147483647 !important;display:flex;flex-direction:column;gap:2px;min-width:180px;max-width:240px;padding:10px 14px;border:3px solid #26296b;border-radius:16px;background:#fff8dc;color:#26296b;box-shadow:4px 5px 0 #f07855,0 8px 18px rgba(38,41,107,.22);font-family:Arial,sans-serif;opacity:0;transform:translateY(5px) scale(.94);pointer-events:none;transition:opacity .15s,transform .15s}.tappy-word-card.visible{opacity:1;transform:translateY(0) scale(1)}.tappy-word-card strong{font-size:20px;color:#e45d3f}.tappy-word-card span{font-size:14px}.tappy-word-card b{align-self:flex-start;padding:2px 8px;border-radius:999px;background:#bcebd5;color:#23734b;font-size:12px}';
                     document.head.appendChild(style);
                 }
                 document.querySelectorAll('.tappy-word').forEach(word => {
@@ -3209,27 +3289,33 @@
        Tree rendering
        ===================================================================== */
     function renderTree(){
-        treeEl.innerHTML = '';
-        const q = searchQuery.trim().toLowerCase();
+    // 如果正在加载，不渲染树内容
+    const hint = document.getElementById('treeLoadingHint');
+    if (hint && hint.style.display !== 'none') {
+        return;
+    }
+    
+    treeEl.innerHTML = '';
+    const q = searchQuery.trim().toLowerCase();
 
-        if(q){
-            renderSearchResults(q);
-            return;
-        }
+    if(q){
+        renderSearchResults(q);
+        return;
+    }
 
-        if(library.length === 0){
-            const empty = document.createElement('div');
-            empty.className = 'empty-hint';
-            empty.textContent = '📖 还没有内容，点击「新建」或「批量导入绘本」或「新增绘本」开始创建';
-            empty.style.padding = '20px 10px';
-            empty.style.textAlign = 'center';
-            empty.style.fontSize = '14px';
-            treeEl.appendChild(empty);
-            return;
-        }
+    if(library.length === 0){
+        const empty = document.createElement('div');
+        empty.className = 'empty-hint';
+        empty.textContent = '📖 还没有内容，点击「新建」或「批量导入绘本」或「新增绘本」开始创建';
+        empty.style.padding = '20px 10px';
+        empty.style.textAlign = 'center';
+        empty.style.fontSize = '14px';
+        treeEl.appendChild(empty);
+        return;
+    }
 
-        sortNodes(library);
-        renderNodes(library, treeEl, 0);
+    sortNodes(library);
+    renderNodes(library, treeEl, 0);
     }
 
     function renderNodes(nodes, container, depth){
@@ -3655,8 +3741,11 @@
         const imgBox = document.createElement('div');
         imgBox.className = 'page-img-box';
         const img = document.createElement('img');
+        
         // 不带 Referer 请求图片：避免触发 COS/CDN 的防盗链（Referer 白名单）拦截
         img.referrerPolicy = 'no-referrer';
+        //允许跨域读取图片
+        img.crossOrigin = 'anonymous';  // ← 添加这一行
         // 使用优化后的 pageSrc 函数加载图片
         const imgSrc = pageSrc(page);
         if (imgSrc) {
@@ -3859,58 +3948,983 @@
         setTimeout(()=> r.remove(), 650);
     }
 
-    function renderSpread(autoSpeak){
-        const story = getCurrentStory();
-        const shouldPromptFolderSelection = !selectedFolderId || !story;
-        if(!story || story.pages.length === 0){
-            spreadEl.innerHTML = '';
-            const empty = document.createElement('div');
-            empty.className = 'page-panel empty';
-            empty.style.flex = '1';
-            const msg = document.createElement('div');
-            msg.className = 'empty-msg';
-            msg.textContent = shouldPromptFolderSelection
-                ? '请选择绘本目录中您要阅读的绘本！'
-                : '📖 点击「添加绘本页面」开始创建';
-            empty.appendChild(msg);
-            spreadEl.appendChild(empty);
-            spreadTag.textContent = '0 / 0';
-            storyCaption.textContent = shouldPromptFolderSelection ? '请选择绘本目录' : (story ? story.title : '请创建绘本');
-            prevBtn.disabled = true;
-            nextBtn.disabled = true;
-            return;
-        }
+    // ============================================================
+    // OCR 自动识别 - 使用 Tesseract.js
+    // ============================================================
 
-        const total = totalSpreads(story);
-        if(currentSpread > total-1) currentSpread = total-1;
-        if(currentSpread < 0) currentSpread = 0;
+    let ocrWorkerInstance = null;
 
-        const leftIdx = currentSpread*2;
-        const rightIdx = leftIdx+1;
-        const leftPage = story.pages[leftIdx] || null;
-        const rightPage = story.pages[rightIdx] || null;
-
-        spreadEl.innerHTML = '';
-        spreadEl.appendChild(buildPagePanel(leftPage, leftIdx));
-        spreadEl.appendChild(buildPagePanel(rightPage, rightIdx));
-
-        storyCaption.textContent = story.title;
-        const shownEnd = Math.min(rightIdx+1, story.pages.length);
-        spreadTag.textContent = story.pages.length
-            ? `${leftIdx+1}${rightIdx < story.pages.length ? '–'+shownEnd : ''} / ${story.pages.length}`
-            : '0 / 0';
-
-        prevBtn.disabled = currentSpread === 0;
-        nextBtn.disabled = currentSpread >= total-1;
-
-        if(autoSpeak){
-            const items = [];
-            const speakers = spreadEl.querySelectorAll('.mini-speaker');
-            if(leftPage && leftPage.text) items.push({ text:leftPage.text, indicatorEl:speakers[0] });
-            if(rightPage && rightPage.text) items.push({ text:rightPage.text, indicatorEl:speakers[1] });
-            speakSequence(items);
+    // 获取或创建 Tesseract Worker（单例复用）
+    async function getOcrWorkerInstance() {
+    if (!ocrWorkerInstance) {
+        try {
+            // Tesseract.js v5 的 createWorker 方法
+            if (typeof Tesseract !== 'undefined' && Tesseract.createWorker) {
+                ocrWorkerInstance = await Tesseract.createWorker('eng');
+                await ocrWorkerInstance.setParameters({
+                    tessedit_pageseg_mode: '6',
+                    tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz .,'!?-"
+                });
+            } else {
+                console.warn('Tesseract.js 未加载，请检查 CDN 引用');
+                return null;
+            }
+        } catch (err) {
+            console.warn('OCR Worker 创建失败:', err);
+            return null;
         }
     }
+    return ocrWorkerInstance;
+}
+
+// 对当前跨页的两张图片进行 OCR 识别
+async function autoOcrCurrentSpread() {
+    const story = getCurrentStory();
+    if (!story || !story.pages || story.pages.length === 0) return;
+    
+    const leftIdx = currentSpread * 2;
+    const rightIdx = leftIdx + 1;
+    
+    // 构建页面信息数组
+    const pageInfos = [];
+    if (story.pages[leftIdx]) {
+        pageInfos.push({ page: story.pages[leftIdx], panelIndex: 0 });
+    }
+    if (story.pages[rightIdx]) {
+        pageInfos.push({ page: story.pages[rightIdx], panelIndex: 1 });
+    }
+    
+    if (pageInfos.length === 0) return;
+    
+    // 获取当前跨页的两个图片容器
+    const imgBoxes = document.querySelectorAll('.page-img-box');
+    if (imgBoxes.length === 0) return;
+    
+    // 对每张图片进行识别
+    for (const info of pageInfos) {
+        const imgBox = imgBoxes[info.panelIndex];
+        if (!imgBox) continue;
+        
+        // 检查是否已经识别过（避免重复）
+        if (imgBox.dataset.ocrDone === 'true') continue;
+        
+        const img = imgBox.querySelector('img');
+        if (!img || !img.src) continue;
+        
+        // 如果图片已有文字内容，直接生成覆盖层
+        const pageText = info.page.text || '';
+        if (pageText.trim().length > 0) {
+            createTextOverlay(imgBox, pageText);
+            imgBox.dataset.ocrDone = 'true';
+            continue;
+        }
+        
+        // 显示识别中状态
+        showOcrStatus(imgBox, '⏳ 识别中...');
+        
+        try {
+            const worker = await getOcrWorkerInstance();
+            if (!worker) {
+                showOcrStatus(imgBox, '⚠️ 引擎未就绪');
+                continue;
+            }
+            
+            const { data } = await worker.recognize(img.src);
+            const rawText = data.text || '';
+            // 使用已有的清洗函数
+            const cleanedText = typeof cleanOcrTextEnhanced === 'function' 
+                ? cleanOcrTextEnhanced(rawText) 
+                : rawText.replace(/\s+/g, ' ').trim();
+            
+            if (cleanedText && cleanedText.length > 2) {
+                info.page.text = cleanedText;
+                createTextOverlay(imgBox, cleanedText);
+                imgBox.dataset.ocrDone = 'true';
+                renderTree();
+                saveLibrary();
+            } else {
+                showOcrStatus(imgBox, '⚠️ 未识别到文字');
+            }
+        } catch (err) {
+            console.warn('OCR 识别失败:', err);
+            showOcrStatus(imgBox, '❌ 识别失败');
+        }
+    }
+}
+
+// 在图片上方显示识别状态
+function showOcrStatus(container, statusText) {
+    const oldStatus = container.querySelector('.ocr-status');
+    if (oldStatus) oldStatus.remove();
+    
+    const status = document.createElement('div');
+    status.className = 'ocr-status';
+    status.style.cssText = `
+        position: absolute;
+        bottom: 12px;
+        right: 12px;
+        z-index: 20;
+        background: rgba(0,0,0,0.7);
+        color: #fff;
+        padding: 4px 12px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-family: 'Nunito', sans-serif;
+        pointer-events: none;
+        backdrop-filter: blur(4px);
+    `;
+    status.textContent = statusText;
+    container.appendChild(status);
+}
+
+// 在图片上方创建可选中、可复制的文字覆盖层
+function createTextOverlay(container, text) {
+    // ===== 安全校验 =====
+    if (!container) {
+        console.warn('⚠️ createTextOverlay: container 为空');
+        return;
+    }
+    if (!text || !text.trim()) {
+        console.warn('⚠️ createTextOverlay: text 为空');
+        return;
+    }
+    
+    try {
+        // 移除已有的覆盖层和状态
+        const existing = container.querySelector('.ocr-overlay');
+        if (existing) existing.remove();
+        const status = container.querySelector('.ocr-status');
+        if (status) status.remove();
+        
+        // ===== 文本预处理：按标点符号换行 =====
+        let formattedText = text
+            .replace(/(?<=[.!?;:])\s+/g, '$&\n')
+            .replace(/(?<=[.!?;:])(?=[A-Z])/g, '\n')
+            .trim();
+        formattedText = formattedText.replace(/\n{2,}/g, '\n');
+        
+        // ===== 创建覆盖层（初始隐藏，位置跟随鼠标） =====
+        const overlay = document.createElement('div');
+        overlay.className = 'ocr-overlay';
+        overlay.style.cssText = `
+            position: absolute;
+            z-index: 40;
+            display: none;
+            padding: 0;
+            overflow: visible;
+            pointer-events: none;
+            border-radius: 16px;
+            background: rgba(0, 0, 0, 0.0);
+            opacity: 0;
+            transition: opacity 0.25s ease;
+            min-width: 40px;
+            max-width: 85%;
+        `;
+        
+        // ===== 卡通橙色边框 =====
+        // 使用多层 box-shadow 模拟卡通边框效果
+        const borderStyle = document.createElement('style');
+        borderStyle.textContent = `
+            .ocr-overlay .ocr-border-wrapper {
+                position: relative;
+                border-radius: 16px;
+                padding: 6px;
+                background: #FF6B00;
+                box-shadow: 
+                    0 0 0 4px #FF8C00,
+                    0 0 0 8px #FFAA33,
+                    0 0 0 12px #FF6B00,
+                    0 0 20px rgba(255, 107, 0, 0.3);
+                animation: ocr-border-pulse 2s ease-in-out infinite;
+            }
+            @keyframes ocr-border-pulse {
+                0%, 100% { box-shadow: 0 0 0 4px #FF8C00, 0 0 0 8px #FFAA33, 0 0 0 12px #FF6B00, 0 0 20px rgba(255,107,0,0.3); }
+                50% { box-shadow: 0 0 0 5px #FFAA33, 0 0 0 9px #FF6B00, 0 0 0 13px #FF8C00, 0 0 25px rgba(255,107,0,0.4); }
+            }
+            .ocr-overlay .ocr-border-dots {
+                position: absolute;
+                inset: 2px;
+                border-radius: 14px;
+                pointer-events: none;
+                z-index: 1;
+                background-image: radial-gradient(#FFD93D 3px, transparent 3px);
+                background-size: 18px 18px;
+                background-position: 5px 5px;
+                opacity: 0.2;
+            }
+            .ocr-overlay .ocr-border-corner {
+                position: absolute;
+                width: 22px;
+                height: 22px;
+                border: 4px solid #FFD93D;
+                pointer-events: none;
+                z-index: 2;
+                border-radius: 6px;
+            }
+            .ocr-overlay .ocr-border-corner.tl {
+                top: 8px;
+                left: 8px;
+                border-right: none;
+                border-bottom: none;
+                border-radius: 8px 0 0 0;
+            }
+            .ocr-overlay .ocr-border-corner.tr {
+                top: 8px;
+                right: 8px;
+                border-left: none;
+                border-bottom: none;
+                border-radius: 0 8px 0 0;
+            }
+            .ocr-overlay .ocr-border-corner.bl {
+                bottom: 8px;
+                left: 8px;
+                border-right: none;
+                border-top: none;
+                border-radius: 0 0 0 8px;
+            }
+            .ocr-overlay .ocr-border-corner.br {
+                bottom: 8px;
+                right: 8px;
+                border-left: none;
+                border-top: none;
+                border-radius: 0 0 8px 0;
+            }
+        `;
+        overlay.appendChild(borderStyle);
+        
+        // ===== 边框容器 =====
+        const borderWrapper = document.createElement('div');
+        borderWrapper.className = 'ocr-border-wrapper';
+        borderWrapper.style.cssText = `
+            display: inline-block;
+            max-width: 100%;
+        `;
+        
+        // 圆点装饰
+        const dotsEl = document.createElement('div');
+        dotsEl.className = 'ocr-border-dots';
+        borderWrapper.appendChild(dotsEl);
+        
+        // 四角装饰
+        ['tl', 'tr', 'bl', 'br'].forEach(function(pos) {
+            const corner = document.createElement('div');
+            corner.className = 'ocr-border-corner ' + pos;
+            borderWrapper.appendChild(corner);
+        });
+        
+        // ===== 文字容器：白底黑字 =====
+        const textContainer = document.createElement('div');
+        textContainer.className = 'ocr-text-container';
+        textContainer.style.cssText = `
+            display: block;
+            padding: 14px 20px;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.0);
+            color: rgba(0, 0, 0, 0.0);
+            transition: background 0.25s ease, color 0.25s ease;
+            font-family: 'Nunito', 'Baloo 2', sans-serif;
+            font-size: 15px;
+            font-weight: 700;
+            line-height: 1.8;
+            user-select: text;
+            -webkit-user-select: text;
+            pointer-events: auto;
+            box-shadow: 0 4px 20px rgba(0,0,0,0);
+            width: 100%;
+            max-height: 200px;
+            overflow-y: auto;
+            overflow-x: hidden;
+            white-space: normal;
+            word-break: break-word;
+            cursor: default;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(38,41,107,0.3) transparent;
+            position: relative;
+            z-index: 3;
+        `;
+        
+        // ===== 按换行符分割 =====
+        const lines = formattedText.split('\n').filter(function(line) { return line.trim().length > 0; });
+        const fragment = document.createDocumentFragment();
+        
+        lines.forEach(function(line, lineIndex) {
+            const lineDiv = document.createElement('div');
+            lineDiv.style.cssText = `
+                display: block;
+                margin-bottom: ${lineIndex < lines.length - 1 ? '2px' : '0'};
+                white-space: nowrap;
+                word-break: keep-all;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            `;
+            
+            const parts = line.match(/[^\s]+|\s+/g) || [line];
+            const wordsFragment = document.createDocumentFragment();
+            
+            for (const part of parts) {
+                if (part.trim().length === 0) {
+                    // 空格用 span 包裹，以便选中时显示颜色
+                    const spaceEl = document.createElement('span');
+                    spaceEl.className = 'tappy-space';
+                    spaceEl.textContent = part;
+                    spaceEl.style.cssText = `
+                        display: inline;
+                        pointer-events: none;
+                        user-select: text;
+                        -webkit-user-select: text;
+                        white-space: pre;
+                    `;
+                    wordsFragment.appendChild(spaceEl);
+                } else {
+                    const wordEl = document.createElement('span');
+                    wordEl.className = 'tappy-word';
+                    wordEl.textContent = part;
+                    wordEl.style.cssText = `
+                        cursor: pointer;
+                        border-radius: 4px;
+                        padding: 0 2px;
+                        transition: background 0.15s, color 0.15s;
+                        display: inline;
+                        pointer-events: auto;
+                        user-select: text;
+                        -webkit-user-select: text;
+                    `;
+                    wordsFragment.appendChild(wordEl);
+                }
+            }
+            
+            lineDiv.appendChild(wordsFragment);
+            fragment.appendChild(lineDiv);
+        });
+        
+        textContainer.appendChild(fragment);
+        borderWrapper.appendChild(textContainer);
+        overlay.appendChild(borderWrapper);
+        
+        // ===== 状态变量 =====
+        let isVisible = false;
+        let hideTimeout = null;
+        let isPositionFixed = false;
+        let fixedLeft = 0;
+        let fixedTop = 0;
+        
+        // ===== 计算并设置位置 =====
+        function setOverlayPosition(event) {
+            const rect = container.getBoundingClientRect();
+            const mouseX = event.clientX - rect.left;
+            const mouseY = event.clientY - rect.top;
+            
+            // 先让 overlay 显示并测量尺寸
+            overlay.style.display = 'block';
+            overlay.style.opacity = '0';
+            overlay.style.left = '0px';
+            overlay.style.top = '0px';
+            
+            // 强制重排，获取实际尺寸
+            void overlay.offsetHeight;
+            
+            // 获取边框包装器的实际尺寸
+            const wrapperWidth = borderWrapper.scrollWidth || 200;
+            const wrapperHeight = borderWrapper.scrollHeight || 60;
+            const gap = 12;
+            
+            // 计算位置：在鼠标下方
+            let left = mouseX - wrapperWidth / 2;
+            let top = mouseY + gap;
+            
+            const containerWidth = rect.width - 16;
+            const containerHeight = rect.height - 16;
+            
+            // 水平边界检查
+            if (left < 8) left = 8;
+            if (left + wrapperWidth > containerWidth - 8) {
+                left = containerWidth - wrapperWidth - 8;
+            }
+            
+            // 垂直边界检查：如果下方空间不够，显示在鼠标上方
+            if (top + wrapperHeight > containerHeight - 8) {
+                top = mouseY - wrapperHeight - gap;
+            }
+            if (top < 8) {
+                top = 8;
+            }
+            
+            // 保存固定位置
+            fixedLeft = left;
+            fixedTop = top;
+            isPositionFixed = true;
+            
+            overlay.style.left = left + 'px';
+            overlay.style.top = top + 'px';
+        }
+        
+        // ===== 显示覆盖层 =====
+        function showOverlay(event) {
+            if (hideTimeout) {
+                clearTimeout(hideTimeout);
+                hideTimeout = null;
+            }
+            
+            // 如果已经显示且位置已固定，直接显示
+            if (isVisible && isPositionFixed) {
+                overlay.style.display = 'block';
+                overlay.style.opacity = '1';
+                textContainer.style.background = 'rgba(255, 255, 255, 0.95)';
+                textContainer.style.color = 'rgba(0, 0, 0, 0.95)';
+                textContainer.style.boxShadow = '0 4px 20px rgba(0,0,0,0.12)';
+                const hint = overlay.querySelector('.ocr-hint');
+                if (hint) hint.style.opacity = '1';
+                return;
+            }
+            
+            // 计算位置
+            setOverlayPosition(event);
+            
+            isVisible = true;
+            overlay.style.opacity = '1';
+            textContainer.style.background = 'rgba(255, 255, 255, 0.95)';
+            textContainer.style.color = 'rgba(0, 0, 0, 0.95)';
+            textContainer.style.boxShadow = '0 4px 20px rgba(0,0,0,0.12)';
+            
+            const hint = overlay.querySelector('.ocr-hint');
+            if (hint) hint.style.opacity = '1';
+        }
+        
+        // ===== 隐藏覆盖层 =====
+        function hideOverlay(delay) {
+            delay = delay || 300;
+            if (hideTimeout) {
+                clearTimeout(hideTimeout);
+            }
+            hideTimeout = setTimeout(function() {
+                isVisible = false;
+                isPositionFixed = false;
+                overlay.style.opacity = '0';
+                textContainer.style.background = 'rgba(255, 255, 255, 0.0)';
+                textContainer.style.color = 'rgba(0, 0, 0, 0.0)';
+                textContainer.style.boxShadow = '0 4px 20px rgba(0,0,0,0)';
+                setTimeout(function() {
+                    overlay.style.display = 'none';
+                }, 300);
+                hideWordCard();
+                document.querySelectorAll('.tappy-word-active').forEach(function(el) {
+                    el.classList.remove('tappy-word-active');
+                });
+                hideTimeout = null;
+            }, delay);
+        }
+        
+        // ===== 监听图片容器的鼠标事件 =====
+        container.addEventListener('mouseenter', function(event) {
+            showOverlay(event);
+        });
+        
+        container.addEventListener('mousemove', function(event) {
+            if (!isVisible) {
+                // 第一次显示时计算位置
+                showOverlay(event);
+            } else if (!isPositionFixed) {
+                // 如果位置还没固定，重新计算
+                setOverlayPosition(event);
+            } else {
+                // 位置已固定，确保显示
+                overlay.style.display = 'block';
+                overlay.style.opacity = '1';
+            }
+            if (hideTimeout) {
+                clearTimeout(hideTimeout);
+                hideTimeout = null;
+            }
+        });
+        
+        container.addEventListener('mouseleave', function() {
+            hideOverlay(300);
+        });
+        
+        // ===== 阻止点击冒泡到图片 =====
+        overlay.addEventListener('click', function(event) {
+            event.stopPropagation();
+        });
+        
+        textContainer.addEventListener('click', function(event) {
+            event.stopPropagation();
+        });
+        
+        // ===== 选中文本朗读 =====
+        function handleTextSelection() {
+            const selection = window.getSelection();
+            const selectedText = selection.toString().trim();
+            
+            if (selectedText.length > 0) {
+                try {
+                    const range = selection.getRangeAt(0);
+                    const container = range.commonAncestorContainer;
+                    if (textContainer.contains(container) || container === textContainer) {
+                        if (hideTimeout) {
+                            clearTimeout(hideTimeout);
+                            hideTimeout = null;
+                        }
+                        stopSpeechSoft();
+                        speakOne(selectedText, null);
+                        const hint = overlay.querySelector('.ocr-select-hint');
+                        if (hint) {
+                            hint.textContent = '🔊 已朗读选中文本';
+                            hint.style.opacity = '1';
+                            setTimeout(function() {
+                                if (hint) hint.style.opacity = '0';
+                            }, 1500);
+                        }
+                        return true;
+                    }
+                } catch(e) {}
+            }
+            return false;
+        }
+        
+        textContainer.addEventListener('mouseup', function() {
+            setTimeout(function() {
+                handleTextSelection();
+            }, 50);
+        });
+        
+        document.addEventListener('mouseup', function() {
+            const selection = window.getSelection();
+            const selectedText = selection.toString().trim();
+            if (selectedText.length > 0) {
+                try {
+                    const range = selection.getRangeAt(0);
+                    const container = range.commonAncestorContainer;
+                    if (textContainer.contains(container) || container === textContainer) {
+                        stopSpeechSoft();
+                        speakOne(selectedText, null);
+                        if (hideTimeout) {
+                            clearTimeout(hideTimeout);
+                            hideTimeout = null;
+                        }
+                        const hint = overlay.querySelector('.ocr-select-hint');
+                        if (hint) {
+                            hint.textContent = '🔊 已朗读选中文本';
+                            hint.style.opacity = '1';
+                            setTimeout(function() {
+                                if (hint) hint.style.opacity = '0';
+                            }, 1500);
+                        }
+                    }
+                } catch(e) {}
+            }
+        });
+        
+        // ===== 悬停查词 =====
+        textContainer.addEventListener('mouseover', function(event) {
+            const target = event.target.closest('.tappy-word');
+            if (target) {
+                document.querySelectorAll('.tappy-word-active').forEach(function(el) {
+                    el.classList.remove('tappy-word-active');
+                });
+                target.classList.add('tappy-word-active');
+                showWordInfo(event, target);
+            }
+        });
+        
+        textContainer.addEventListener('mousemove', function(event) {
+            const target = event.target.closest('.tappy-word');
+            if (target) {
+                updateWordCardPosition(event);
+            }
+        });
+        
+        textContainer.addEventListener('mouseleave', function() {
+            hideWordCard();
+            document.querySelectorAll('.tappy-word-active').forEach(function(el) {
+                el.classList.remove('tappy-word-active');
+            });
+        });
+        
+        // ===== 点击单词朗读 =====
+        textContainer.addEventListener('click', function(event) {
+            const target = event.target.closest('.tappy-word');
+            if (target) {
+                const word = target.textContent.trim();
+                if (word) {
+                    stopSpeechSoft();
+                    speakOne(word, null);
+                    event.stopPropagation();
+                }
+            }
+        });
+        
+        // ===== 样式 =====
+        const styleEl = document.createElement('style');
+        styleEl.textContent = `
+            .ocr-overlay .tappy-word {
+                cursor: pointer;
+                border-radius: 4px;
+                padding: 0 2px;
+                transition: background 0.15s, color 0.15s;
+                display: inline;
+                pointer-events: auto;
+                user-select: text;
+                -webkit-user-select: text;
+            }
+            .ocr-overlay .tappy-word:hover {
+                background: #bde7f6 !important;
+                color: #26296B !important;
+            }
+            .ocr-overlay .tappy-word-active {
+                background: #f07855 !important;
+                color: #fff !important;
+                box-shadow: 0 1px 0 rgba(38, 41, 107, 0.35);
+            }
+            .ocr-overlay .tappy-space {
+                display: inline;
+                pointer-events: none;
+                user-select: text;
+                -webkit-user-select: text;
+                white-space: pre;
+                min-width: 1px;
+            }
+            .ocr-overlay .tappy-word::selection,
+            .ocr-overlay .tappy-space::selection {
+                background: #7BC67E !important;
+                color: #26296B !important;
+            }
+            .ocr-overlay .tappy-word::-moz-selection,
+            .ocr-overlay .tappy-space::-moz-selection {
+                background: #7BC67E !important;
+                color: #26296B !important;
+            }
+            .ocr-overlay .ocr-text-container::selection {
+                background: #7BC67E !important;
+                color: #26296B !important;
+            }
+            .ocr-overlay .ocr-text-container::-moz-selection {
+                background: #7BC67E !important;
+                color: #26296B !important;
+            }
+            .ocr-overlay .ocr-text-container *::selection {
+                background: #7BC67E !important;
+                color: #26296B !important;
+            }
+            .ocr-overlay .ocr-text-container *::-moz-selection {
+                background: #7BC67E !important;
+                color: #26296B !important;
+            }
+            .ocr-overlay .ocr-text-container,
+            .ocr-overlay .ocr-text-container * {
+                user-select: text !important;
+                -webkit-user-select: text !important;
+            }
+            .ocr-overlay .ocr-text-container::-webkit-scrollbar {
+                width: 5px;
+            }
+            .ocr-overlay .ocr-text-container::-webkit-scrollbar-track {
+                background: transparent;
+            }
+            .ocr-overlay .ocr-text-container::-webkit-scrollbar-thumb {
+                background: rgba(38,41,107,0.3);
+                border-radius: 999px;
+            }
+            .ocr-overlay .ocr-text-container::-webkit-scrollbar-thumb:hover {
+                background: rgba(38,41,107,0.5);
+            }
+        `;
+        overlay.appendChild(styleEl);
+        
+        // ===== 提示 =====
+        const hint = document.createElement('div');
+        hint.className = 'ocr-hint';
+        hint.style.cssText = `
+            position: absolute;
+            bottom: -26px;
+            right: 0;
+            font-size: 10px;
+            color: rgba(255,255,255,0.7);
+            background: rgba(0,0,0,0.5);
+            padding: 2px 12px;
+            border-radius: 999px;
+            pointer-events: none;
+            font-family: 'Nunito', sans-serif;
+            backdrop-filter: blur(2px);
+            opacity: 0;
+            transition: opacity 0.4s ease;
+            white-space: nowrap;
+            z-index: 10;
+        `;
+        hint.textContent = '📝 悬停查词 / 点击朗读';
+        overlay.appendChild(hint);
+        
+        const selectHint = document.createElement('div');
+        selectHint.className = 'ocr-select-hint';
+        selectHint.style.cssText = `
+            position: absolute;
+            top: -30px;
+            right: 0;
+            font-size: 11px;
+            color: rgba(255,255,255,0.9);
+            background: rgba(0,0,0,0.6);
+            padding: 2px 14px;
+            border-radius: 999px;
+            pointer-events: none;
+            font-family: 'Nunito', sans-serif;
+            backdrop-filter: blur(2px);
+            opacity: 0;
+            transition: opacity 0.4s ease;
+            white-space: nowrap;
+            z-index: 10;
+        `;
+        selectHint.textContent = '🔊 已朗读选中文本';
+        overlay.appendChild(selectHint);
+        
+        // ===== 添加到容器 =====
+        container.style.position = 'relative';
+        container.appendChild(overlay);
+        
+        // 默认不显示
+        overlay.style.display = 'none';
+        
+    } catch (error) {
+        console.error('❌ createTextOverlay 执行失败:', error);
+    }
+}
+
+    // ============================================================
+// 🆕 单词释义功能（使用事件委托 + 与 HTML 页面样式一致）
+// ============================================================
+
+let wordCard = null;
+let wordCardRequestId = 0;
+const wordCardPendingRequests = new Map();
+
+// 显示单词卡片
+function showWordInfo(event, wordElement) {
+    const text = wordElement.textContent.trim();
+    if (!text) return;
+    
+    // 清除之前的卡片
+    hideWordCard();
+    
+        // 创建卡片
+    if (!wordCard) {
+        wordCard = document.createElement('div');
+        wordCard.className = 'tappy-word-card';
+        // 🚨 核心修复：将卡片追加到真正的全屏元素内（而不是body），这样它就不会被Top Layer挡住！
+        const fullscreenEl = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement;
+        const targetParent = fullscreenEl || document.body; 
+        targetParent.appendChild(wordCard);
+        
+        if (!document.getElementById('tappy-word-card-style-ocr')) {
+            const style = document.createElement('style');
+            style.id = 'tappy-word-card-style-ocr';
+            style.textContent = `
+                .tappy-word-card {
+                    position: fixed;
+                    z-index: 2147483647 !important;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 2px;
+                    min-width: 180px;
+                    max-width: 240px;
+                    padding: 10px 14px;
+                    border: 3px solid #26296b;
+                    border-radius: 16px;
+                    background: #fff8dc;
+                    color: #26296b;
+                    box-shadow: 4px 5px 0 #f07855, 0 8px 18px rgba(38,41,107,.22);
+                    font-family: Arial, sans-serif;
+                    opacity: 0;
+                    transform: translateY(5px) scale(0.94);
+                    pointer-events: none;
+                    transition: opacity 0.15s, transform 0.15s;
+                    will-change: transform, opacity;
+                }
+                .tappy-word-card.visible {
+                    opacity: 1;
+                    transform: translateY(0) scale(1);
+                }
+                .tappy-word-card strong {
+                    font-size: 20px;
+                    color: #e45d3f;
+                }
+                .tappy-word-card span {
+                    font-size: 14px;
+                }
+                .tappy-word-card b {
+                    align-self: flex-start;
+                    padding: 2px 8px;
+                    border-radius: 999px;
+                    background: #bcebd5;
+                    color: #23734b;
+                    font-size: 12px;
+                }
+            `;
+            document.head.appendChild(style);
+        }
+    }
+    
+    // 查询词典
+    const key = text.toLowerCase();
+    const id = ++wordCardRequestId;
+    
+    wordCard.innerHTML = `
+        <strong>${text}</strong>
+        <span style="color:#8a7a5c;">⏳ 查询中...</span>
+    `;
+    wordCard.classList.add('visible');
+    updateWordCardPosition(event);
+    
+    const timeout = setTimeout(function() {
+        wordCardPendingRequests.delete(id);
+        wordCard.innerHTML = `
+            <strong>${text}</strong>
+            <span style="color:#8a7a5c;">暂无音标</span>
+            <span style="color:#8a7a5c;">暂无中文释义</span>
+        `;
+        wordCard.classList.add('visible');
+    }, 3000);
+    wordCardPendingRequests.set(id, { timeout: timeout });
+    
+    if (window.tappyReadCorpus) {
+        window.tappyReadCorpus.then(function(corpus) {
+            const entry = corpus[key] || {};
+            const request = wordCardPendingRequests.get(id);
+            if (!request) return;
+            clearTimeout(request.timeout);
+            wordCardPendingRequests.delete(id);
+            wordCard.innerHTML = `
+                <strong>${text}</strong>
+                <span>${entry.ph || '暂无音标'}</span>
+                <b>${entry.zh || '暂无中文释义'}</b>
+            `;
+            wordCard.classList.add('visible');
+        }).catch(function() {
+            const request = wordCardPendingRequests.get(id);
+            if (!request) return;
+            clearTimeout(request.timeout);
+            wordCardPendingRequests.delete(id);
+        });
+    }
+}
+
+// 更新单词卡片位置（修复全屏坐标偏移）
+function updateWordCardPosition(event) {
+    if (!wordCard) return;
+    
+    const gap = 12;
+    const cardWidth = wordCard.offsetWidth || 200;
+    const cardHeight = wordCard.offsetHeight || 100;
+    
+    // 强行使用视口基准（全屏时不会有偏移）
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+    
+    const maxLeft = Math.max(8, viewportWidth - cardWidth - 8);
+    const left = Math.min(Math.max(8, event.clientX - cardWidth / 2), maxLeft);
+    
+    // 计算在鼠标下方
+    const belowTop = event.clientY + gap;
+    const top = (belowTop + cardHeight <= viewportHeight - 8)
+        ? belowTop
+        : Math.max(8, event.clientY - cardHeight - gap);
+    
+    wordCard.style.left = left + 'px';
+    wordCard.style.top = top + 'px';
+    wordCard.classList.add('visible');
+}
+
+// 隐藏单词卡片
+function hideWordCard() {
+    if (wordCard) {
+        wordCard.classList.remove('visible');
+    }
+    document.querySelectorAll('.tappy-word-active').forEach(function(el) {
+        el.classList.remove('tappy-word-active');
+    });
+    wordCardPendingRequests.forEach(function(request, id) {
+        clearTimeout(request.timeout);
+        wordCardPendingRequests.delete(id);
+    });
+}
+
+    function renderSpread(autoSpeak) {
+    const story = getCurrentStory();
+    const shouldPromptFolderSelection = !selectedFolderId || !story;
+    
+    if (!story || story.pages.length === 0) {
+        spreadEl.innerHTML = '';
+        const empty = document.createElement('div');
+        empty.className = 'page-panel empty';
+        empty.style.flex = '1';
+        const msg = document.createElement('div');
+        msg.className = 'empty-msg';
+        msg.textContent = shouldPromptFolderSelection
+            ? '请选择绘本目录中您要阅读的绘本！'
+            : '📖 点击「添加绘本页面」开始创建';
+        empty.appendChild(msg);
+        spreadEl.appendChild(empty);
+        spreadTag.textContent = '0 / 0';
+        storyCaption.textContent = shouldPromptFolderSelection ? '请选择绘本目录' : (story ? story.title : '请创建绘本');
+        prevBtn.disabled = true;
+        nextBtn.disabled = true;
+        return;
+    }
+
+    const total = totalSpreads(story);
+    if (currentSpread > total - 1) currentSpread = total - 1;
+    if (currentSpread < 0) currentSpread = 0;
+
+    const leftIdx = currentSpread * 2;
+    const rightIdx = leftIdx + 1;
+    const leftPage = story.pages[leftIdx] || null;
+    const rightPage = story.pages[rightIdx] || null;
+
+    spreadEl.innerHTML = '';
+    spreadEl.appendChild(buildPagePanel(leftPage, leftIdx));
+    spreadEl.appendChild(buildPagePanel(rightPage, rightIdx));
+
+    storyCaption.textContent = story.title;
+    const shownEnd = Math.min(rightIdx + 1, story.pages.length);
+    spreadTag.textContent = story.pages.length
+        ? `${leftIdx + 1}${rightIdx < story.pages.length ? '–' + shownEnd : ''} / ${story.pages.length}`
+        : '0 / 0';
+
+    prevBtn.disabled = currentSpread === 0;
+    nextBtn.disabled = currentSpread >= total - 1;
+
+    if (autoSpeak) {
+        const items = [];
+        const speakers = spreadEl.querySelectorAll('.mini-speaker');
+        if (leftPage && leftPage.text) items.push({ text: leftPage.text, indicatorEl: speakers[0] });
+        if (rightPage && rightPage.text) items.push({ text: rightPage.text, indicatorEl: speakers[1] });
+        speakSequence(items);
+    }
+
+    // ===== 🔧 修改：直接为当前页创建覆盖层 =====
+    // 获取当前显示的两个图片容器
+    const imgBoxes = spreadEl.querySelectorAll('.page-img-box');
+    const pages = [leftPage, rightPage];
+    
+    imgBoxes.forEach(function(imgBox, index) {
+        const page = pages[index];
+        if (!page || !imgBox) return;
+        
+        // 如果页面有文字，直接创建覆盖层
+        if (page.text && page.text.trim().length > 0) {
+            // 移除旧覆盖层
+            const old = imgBox.querySelector('.ocr-overlay');
+            if (old) old.remove();
+            // 创建新覆盖层
+            createTextOverlay(imgBox, page.text);
+            imgBox.dataset.ocrDone = 'true';
+        }
+    });
+
+    // ===== 保留自动 OCR 识别（针对没有文字的页面） =====
+    if (story && story.pages && story.pages.length > 0) {
+        setTimeout(function() {
+            autoOcrCurrentSpread();
+        }, 600);
+    }
+}
 
     function renderAll(autoSpeak){
     renderTree();
@@ -3921,15 +4935,28 @@
     /* =====================================================================
        Navigation
        ===================================================================== */
-    prevBtn.addEventListener('click', ()=>{
-        if(currentSpread > 0){ currentSpread--; renderAll(true); }
-    });
-    nextBtn.addEventListener('click', ()=>{
-        const story = getCurrentStory();
-        if(!story) return;
-        const total = totalSpreads(story);
-        if(currentSpread < total-1){ currentSpread++; renderAll(true); }
-    });
+    prevBtn.addEventListener('click', function() {
+    if (currentSpread > 0) {
+        currentSpread--;
+        renderAll(true);
+        setTimeout(function() {
+            autoOcrCurrentSpread();
+        }, 600);
+    }
+});
+
+nextBtn.addEventListener('click', function() {
+    var story = getCurrentStory();
+    if (!story) return;
+    var total = totalSpreads(story);
+    if (currentSpread < total - 1) {
+        currentSpread++;
+        renderAll(true);
+        setTimeout(function() {
+            autoOcrCurrentSpread();
+        }, 600);
+    }
+});
     document.addEventListener('keydown', (e)=>{
         const t = e.target;
         if(t && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.isContentEditable)) return;
@@ -5884,20 +6911,40 @@
     /* =====================================================================
    Init
    ===================================================================== */
-// 初始化部分
-function ensureSortKeys(nodes) {
-    if(!nodes || !Array.isArray(nodes)) return;
-    nodes.forEach((node, index) => {
-        if (node.sortKey === undefined || node.sortKey === null) {
-            node.sortKey = index + 1;
-        }
-        if (node.type === 'folder' && node.children) {
-            ensureSortKeys(node.children);
-        }
-    });
-}
-ensureSortKeys(library);
-sortNodes(library);
+    // 初始化部分 - 强制从服务器加载，禁止使用本地缓存
+    async function initApp() {
+    // 强制清空所有数据
+    library = [];
+    collapsedNodes = new Set();
+    selectedFolderId = null;
+    currentStoryId = null;
+    
+    // 显示加载状态
+    showTreeLoading(true);
+    
+    // 清空本地缓存键，确保完全从服务器加载
+    const userId = localStorage.getItem(USER_ID_KEY);
+    if (userId) {
+        const scope = ':' + userId;
+        localStorage.removeItem('wib:library:v26' + scope);
+        localStorage.removeItem('wib:selectedFolder' + scope);
+        localStorage.removeItem('wib:currentStoryId' + scope);
+        localStorage.removeItem('wib:collapsed_v2' + scope);
+    }
+    
+    // 只从服务器加载
+    await loadRemoteLibrary();
+    
+    // 默认不选中绘本（不自动朗读）
+    currentStoryId = null;
+    localStorage.removeItem(CURRENT_STORY_KEY);
+    
+    renderTree();
+    renderAll(false);
+    }
+
+    // 启动应用
+    initApp();
 
 // 页面首次打开时不自动选中绘本，也不自动朗读；必须由用户点击某本绘本后才显示内容。
 if (!selectedFolderId) {
