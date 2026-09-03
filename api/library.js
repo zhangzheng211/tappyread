@@ -6,7 +6,17 @@ const COS_REGION = process.env.COS_REGION || 'ap-guangzhou';
 const COS_JSON_DIR = (process.env.COS_JSON_DIR || 'json').replace(/\/+$/, '');
 const COS_BASE_URL = `https://${COS_BUCKET}.cos.${COS_REGION}.myqcloud.com/`;
 const cosConfigured = Boolean(process.env.COS_SECRET_ID && process.env.COS_SECRET_KEY);
-const cosClient = cosConfigured ? new COS({ SecretId: process.env.COS_SECRET_ID, SecretKey: process.env.COS_SECRET_KEY }) : null;
+const cosClient = cosConfigured
+  ? new COS({
+      SecretId: process.env.COS_SECRET_ID,
+      SecretKey: process.env.COS_SECRET_KEY,
+      // Vercel 函数默认可能跑在美国区域，到广州 COS 一次往返都要 200~400ms，
+      // 一旦网络抖动（跨太平洋链路很常见），SDK 默认的重试机制会让请求越等越久。
+      // 这里给单次请求设置 8 秒硬超时，超时就直接失败，交给上层做快速降级，
+      // 而不是让整个 /api/library 请求被拖到几十秒甚至更久。
+      Timeout: 8000
+    })
+  : null;
 
 function sendJson(res, status, body) {
   res.status(status).setHeader('Content-Type', 'application/json; charset=utf-8').end(JSON.stringify(body));
@@ -111,17 +121,25 @@ function readCosJsonFile(key) {
 
 async function getLatestLibraryFromCos(username) {
   if (!cosConfigured || !username) return null;
+  const safeUsername = sanitizeUsername(username).replace(/_+$/g, '') || 'guest';
+  const directKey = `${COS_JSON_DIR}/${safeUsername}.json`;
+
+  // 快速路径：绝大多数情况下，文件就在标准的 json/{username}.json 位置（保存时
+  // 就是写到这里的），直接 getObject 一次就能拿到，不需要先 getBucket 列出整个
+  // json/ 目录再匹配文件名——这一步以前是"先 list 再 get"两次串行的 COS 请求，
+  // 在跨区域网络较慢时会明显拖慢首屏加载速度，这里改成"先直接 get，找不到才
+  // 退回到 list 兼容旧文件名"，常见情况下能省下一次往返。
+  const direct = await readCosJsonFile(directKey);
+  if (direct) return direct;
+
   try {
     const keys = await listCosKeys(`${COS_JSON_DIR}/`);
-    const safeUsername = sanitizeUsername(username).replace(/_+$/g, '') || 'guest';
-    const directKey = `${COS_JSON_DIR}/${safeUsername}.json`;
-    const exactMatch = keys.includes(directKey) ? directKey : null;
     const legacyMatches = keys.filter(key => {
       const fileName = key.split('/').pop() || '';
       const baseName = fileName.replace(/\.json$/i, '');
       return baseName === safeUsername || baseName.startsWith(`${safeUsername}_绘本目录`);
     });
-    const preferred = exactMatch || legacyMatches[0] || null;
+    const preferred = legacyMatches[0] || null;
     if (!preferred) return null;
     return await readCosJsonFile(preferred);
   } catch (error) {

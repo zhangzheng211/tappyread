@@ -46,7 +46,7 @@ const COS_BASE_URL = `https://${COS_BUCKET}.cos.${COS_REGION}.myqcloud.com/`;
 
 const cosConfigured = Boolean(process.env.COS_SECRET_ID && process.env.COS_SECRET_KEY);
 const cosClient = cosConfigured
-  ? new COS({ SecretId: process.env.COS_SECRET_ID, SecretKey: process.env.COS_SECRET_KEY })
+  ? new COS({ SecretId: process.env.COS_SECRET_ID, SecretKey: process.env.COS_SECRET_KEY, Timeout: 8000 })
   : null;
 
 function sendCosConfigError(res) {
@@ -173,17 +173,22 @@ async function readCosJsonFile(key) {
 
 async function getLatestLibraryFromCos(username) {
   if (!cosConfigured || !username) return null;
+  const safeUsername = sanitizeUsername(username).replace(/_+$/g, '') || 'guest';
+  const directKey = `${COS_JSON_DIR}/${safeUsername}.json`;
+
+  // 快速路径：直接读取标准位置的文件，找不到（404）才退回到列出整个 json/
+  // 目录去匹配旧文件名，避免每次都做"先 list 再 get"两次串行请求
+  const direct = await readCosJsonFile(directKey);
+  if (direct) return direct;
+
   try {
     const keys = await listCosKeys(`${COS_JSON_DIR}/`);
-    const safeUsername = sanitizeUsername(username).replace(/_+$/g, '') || 'guest';
-    const directKey = `${COS_JSON_DIR}/${safeUsername}.json`;
-    const exactMatch = keys.includes(directKey) ? directKey : null;
     const legacyMatches = keys.filter(key => {
       const fileName = key.split('/').pop() || '';
       const baseName = fileName.replace(/\.json$/i, '');
       return baseName === safeUsername || baseName.startsWith(`${safeUsername}_绘本目录`);
     });
-    const preferred = exactMatch || legacyMatches[0] || null;
+    const preferred = legacyMatches[0] || null;
     if (!preferred) return null;
     return await readCosJsonFile(preferred);
   } catch (error) {

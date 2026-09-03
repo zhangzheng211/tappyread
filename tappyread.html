@@ -1140,7 +1140,11 @@ body.reader-fullscreen .stage-wrap {
         </div>
         <div class="tree" id="tree">
     <div class="loading-hint" id="treeLoadingHint" style="padding:20px 10px; text-align:center; font-size:14px; color:var(--tent-navy); font-weight:700;">
-        ⏳ 请稍后！绘本目录加载中......
+        ⏳ 请稍后！绘本目录加载中……
+        <div id="treeLoadingRetryWrap" style="display:none; margin-top:10px;">
+            <div style="font-weight:500; font-size:12.5px; color:#8a6d3b; margin-bottom:8px;">网络较慢，加载超时了</div>
+            <button type="button" id="treeLoadingRetryBtn" style="border:2px solid var(--tent-navy); background:#fff; color:var(--tent-navy); border-radius:10px; padding:6px 14px; font-weight:700; cursor:pointer;">🔄 重试</button>
+        </div>
     </div>
 </div>
     </aside>
@@ -2189,9 +2193,11 @@ body.reader-fullscreen .stage-wrap {
     function showTreeLoading(show) {
     const hint = document.getElementById('treeLoadingHint');
     const tree = document.getElementById('tree');
+    const retryWrap = document.getElementById('treeLoadingRetryWrap');
     if (!hint || !tree) return;
-    
+
     if (show) {
+        if(retryWrap) retryWrap.style.display = 'none';
         hint.style.display = 'block';
         // 清空树的内容，只显示加载提示
         tree.innerHTML = '';
@@ -2200,6 +2206,16 @@ body.reader-fullscreen .stage-wrap {
         hint.style.display = 'none';
     }
     }
+
+    function showTreeLoadingTimedOut() {
+        const retryWrap = document.getElementById('treeLoadingRetryWrap');
+        if(retryWrap) retryWrap.style.display = 'block';
+    }
+
+    // "重试"按钮：网络慢导致加载超时时，用户可以手动重新拉一次，而不用刷新整个页面
+    document.getElementById('treeLoadingRetryBtn')?.addEventListener('click', () => {
+        loadRemoteLibrary();
+    });
 
     async function loadRemoteLibrary()
     {
@@ -2211,12 +2227,20 @@ body.reader-fullscreen .stage-wrap {
     
     // 显示加载状态
     showTreeLoading(true);
-    
+
+    // 前端超时兜底：原生 fetch 没有默认超时，网络异常/服务端很慢时会一直挂着，
+    // "绘本目录加载中……"就会永远显示。这里用 AbortController 设置 12 秒超时，
+    // 超时后主动放弃这次请求，给用户一个"加载超时，点击重试"的提示，而不是无限等待。
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
+
     try{
         const response = await fetch(`${API_BASE}/library`, {
             headers: { Authorization: `Bearer ${token}` },
-            credentials: 'include'
+            credentials: 'include',
+            signal: controller.signal
         });
+        clearTimeout(timeoutId);
         if(response.status === 401){
             localStorage.removeItem(AUTH_TOKEN_KEY);
             localStorage.removeItem(USER_ID_KEY);
@@ -2268,7 +2292,14 @@ body.reader-fullscreen .stage-wrap {
         renderTree();
         renderAll(false);
     }catch(error){
+        clearTimeout(timeoutId);
         console.error('加载绘本目录失败，请检查网络', error);
+        if(error && error.name === 'AbortError'){
+            // 超时：保留"加载中"提示，额外露出"重试"按钮，不要清空成空状态，
+            // 避免网络只是暂时慢一点就把用户已导入的目录"误判"成没有数据
+            showTreeLoadingTimedOut();
+            return;
+        }
         // 网络失败时显示空状态，不使用本地缓存
         library = [];
         collapsedNodes = new Set();
