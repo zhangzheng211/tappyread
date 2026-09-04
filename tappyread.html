@@ -1682,6 +1682,74 @@ body.reader-fullscreen .stage-wrap {
     const CURRENT_STORY_KEY = 'wib:currentStoryId' + USER_SCOPE;
     const IMAGE_CACHE_KEY = 'wib:imageCache' + USER_SCOPE;
 
+    /* =====================================================================
+       ===== IndexedDB 本地缓存（替代 localStorage 存放"大体积"数据）=====
+       localStorage 每个域名只有 5~10MB 的容量上限，写入超限会直接抛出
+       QuotaExceededError 导致保存失败。绘本目录 JSON（wib:library:v26）和
+       图片 Base64 缓存（wib:imageCache）会随着绘本数量、页数增多而越变越大，
+       很容易撞到这个上限——这正是"绘本变多后本地缓存失败/溢出"的根本原因。
+       IndexedDB 是浏览器内置的结构化数据库，可用容量通常是几百 MB 到 GB 级别
+       （具体取决于浏览器和磁盘剩余空间），用来存这类大数据更合适。像登录态、
+       当前选中绘本 ID 这类几十个字节的小配置项，仍然留在 localStorage 里，
+       没有必要为了几个字节的数据引入异步读写的复杂度。
+       ===================================================================== */
+    const IDB_NAME = 'tappyread-db';
+    const IDB_STORE = 'kv';
+    let __idbPromise = null;
+    function openIdb(){
+        if(__idbPromise) return __idbPromise;
+        __idbPromise = new Promise((resolve, reject) => {
+            if(!('indexedDB' in window)){ reject(new Error('浏览器不支持 IndexedDB')); return; }
+            const req = indexedDB.open(IDB_NAME, 1);
+            req.onupgradeneeded = () => {
+                const db = req.result;
+                if(!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
+            };
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+        });
+        return __idbPromise;
+    }
+    async function idbSet(key, value){
+        try{
+            const db = await openIdb();
+            return await new Promise((resolve, reject) => {
+                const tx = db.transaction(IDB_STORE, 'readwrite');
+                tx.objectStore(IDB_STORE).put(value, key);
+                tx.oncomplete = () => resolve(true);
+                tx.onerror = () => reject(tx.error);
+            });
+        }catch(e){
+            console.warn('IndexedDB 写入失败（不影响云端已同步的数据）：', key, e);
+            return false;
+        }
+    }
+    async function idbGet(key){
+        try{
+            const db = await openIdb();
+            return await new Promise((resolve, reject) => {
+                const tx = db.transaction(IDB_STORE, 'readonly');
+                const req = tx.objectStore(IDB_STORE).get(key);
+                req.onsuccess = () => resolve(req.result !== undefined ? req.result : null);
+                req.onerror = () => reject(req.error);
+            });
+        }catch(e){
+            console.warn('IndexedDB 读取失败：', key, e);
+            return null;
+        }
+    }
+    async function idbDelete(key){
+        try{
+            const db = await openIdb();
+            return await new Promise((resolve, reject) => {
+                const tx = db.transaction(IDB_STORE, 'readwrite');
+                tx.objectStore(IDB_STORE).delete(key);
+                tx.oncomplete = () => resolve(true);
+                tx.onerror = () => reject(tx.error);
+            });
+        }catch(e){ return false; }
+    }
+
     function loadOxfordCorpus() {
         return fetch('oxford_corpus_complete.json', { cache: 'no-store' })
             .then(response => {
@@ -2234,17 +2302,19 @@ body.reader-fullscreen .stage-wrap {
                 selectedFolderId: snapshot.selectedFolderId || null,
                 currentStoryId: snapshot.currentStoryId || null
             };
+            // 目录树体积可能较大（绘本一多，几 MB 很常见），改存 IndexedDB，
+            // 不再受 localStorage 5~10MB 上限限制；小的定位类配置项（选中的
+            // 文件夹、展开状态、当前绘本 ID）体积很小，仍然放在 localStorage，
+            // 保持读取简单、同步。
             try {
-                localStorage.setItem(LS_LIB_KEY, JSON.stringify(safeCache));
+                await idbSet(LS_LIB_KEY, safeCache);
                 if(snapshot.selectedFolderId) localStorage.setItem(LS_FOLDER_KEY, snapshot.selectedFolderId);
                 else localStorage.removeItem(LS_FOLDER_KEY);
                 localStorage.setItem(LS_COLLAPSED_KEY, JSON.stringify(snapshot.collapsed));
                 if(snapshot.currentStoryId) localStorage.setItem(CURRENT_STORY_KEY, snapshot.currentStoryId);
                 else localStorage.removeItem(CURRENT_STORY_KEY);
             } catch (localErr) {
-                console.warn('本地缓存写入超出容量，继续保留云端同步', localErr);
-                // 如果 localStorage 满了，尝试清理掉本地的图片缓存腾出空间
-                try { localStorage.removeItem(IMAGE_CACHE_KEY); } catch (cleanErr) {}
+                console.warn('本地缓存写入失败，继续保留云端同步', localErr);
             }
             const token = localStorage.getItem(AUTH_TOKEN_KEY);
             if(token){
@@ -2395,9 +2465,31 @@ body.reader-fullscreen .stage-wrap {
         location.replace('index.html');
         return;
             }
-    
-    // 显示加载状态
-    showTreeLoading(true);
+
+    // ===== 优化点：先用 IndexedDB 里的本地缓存"秒开"，网络数据到达后再静默校正 =====
+    // 以前每次打开页面都是"整屏转圈等网络返回"，哪怕上一次已经看过这个绘本目录。
+    // 现在先尝试从 IndexedDB 读一份最近一次保存的缓存，如果有就立刻渲染出来（几乎
+    // 是瞬间完成，不需要等网络），用户可以马上开始浏览/点读；紧接着仍然照常去 COS/
+    // 服务器拉取最新数据，拉到之后如果有变化再悄悄刷新一次即可，不会展示过期数据，
+    // 也不会因为网络失败就把已经看到的内容清空。
+    let paintedFromCache = false;
+    try {
+        const cached = await idbGet(LS_LIB_KEY);
+        if(cached && Array.isArray(cached.tree) && cached.tree.length > 0){
+            library = cached.tree;
+            collapsedNodes = new Set(Array.isArray(cached.collapsed) ? cached.collapsed : []);
+            selectedFolderId = cached.selectedFolderId || null;
+            currentStoryId = cached.currentStoryId || null;
+            showTreeLoading(false);
+            renderTree();
+            renderAll(false);
+            paintedFromCache = true;
+        }
+    } catch(e) { /* 缓存读取失败不影响后续正常的网络加载流程 */ }
+
+    // 只有在没有缓存可以先展示的时候，才显示"加载中"转圈提示；
+    // 已经用缓存秒开的情况下，网络请求在后台默默进行即可，不打断用户
+    if(!paintedFromCache) showTreeLoading(true);
 
     try{
         // 优先：从 COS 直读目录 JSON（签名 GET）。6MB+ 的大目录不再经后端/Vercel 中转，
@@ -2465,14 +2557,14 @@ body.reader-fullscreen .stage-wrap {
             currentStoryId = null;
         }
         
-        // 同步到本地缓存
+        // 同步到本地缓存（IndexedDB，不再受 localStorage 容量限制）
         try {
-            localStorage.setItem(LS_LIB_KEY, JSON.stringify({
+            await idbSet(LS_LIB_KEY, {
                 tree: compactLibraryForLocalStorage(library),
                 collapsed: [...collapsedNodes],
                 selectedFolderId: selectedFolderId || null,
                 currentStoryId: currentStoryId || null
-            }));
+            });
             if(selectedFolderId) localStorage.setItem(LS_FOLDER_KEY, selectedFolderId);
             else localStorage.removeItem(LS_FOLDER_KEY);
             if(currentStoryId) localStorage.setItem(CURRENT_STORY_KEY, currentStoryId);
@@ -2488,7 +2580,8 @@ body.reader-fullscreen .stage-wrap {
             }
         }
         
-        // 隐藏加载状态，渲染树
+        // 隐藏加载状态，用最新数据刷新一次（如果之前已经用缓存秒开过，这里只是
+        // 悄悄用最新数据覆盖，绝大多数情况下内容没有变化，用户不会感知到重新渲染）
         showTreeLoading(false);
         renderTree();
         renderAll(false);
@@ -2497,10 +2590,17 @@ body.reader-fullscreen .stage-wrap {
         if(error && error.name === 'AbortError'){
             // 超时：保留"加载中"提示，额外露出"重试"按钮，不要清空成空状态，
             // 避免网络只是暂时慢一点就把用户已导入的目录"误判"成没有数据
-            showTreeLoadingTimedOut();
+            if(!paintedFromCache) showTreeLoadingTimedOut();
             return;
         }
-        // 网络失败时显示空状态，不使用本地缓存
+        if(paintedFromCache){
+            // 已经用本地缓存展示过内容了：网络这次失败，保留现状不清空，
+            // 只在控制台提示一下，避免把用户正在看的绘本目录突然清没
+            showTreeLoading(false);
+            console.warn('⚠️ 本次未能连接服务器同步最新数据，当前显示的是本地缓存内容');
+            return;
+        }
+        // 既没有本地缓存、网络又失败：显示空状态
         library = [];
         collapsedNodes = new Set();
         selectedFolderId = null;
@@ -2812,11 +2912,11 @@ body.reader-fullscreen .stage-wrap {
                     Object.keys(backupData.imageData).forEach(key => {
                         sessionSrcCache[key] = backupData.imageData[key];
                     });
-                    try {
-                        localStorage.setItem(IMAGE_CACHE_KEY, JSON.stringify(backupData.imageData));
-                    } catch(e) {
-                        console.warn('图片数据较大，无法全部存入 localStorage，将在会话中保留');
-                    }
+                    // 图片 Base64 缓存改存 IndexedDB，不再受 localStorage 容量限制，
+                    // 备份文件里图片再多也能正常缓存下来
+                    idbSet(IMAGE_CACHE_KEY, backupData.imageData).catch(() => {
+                        console.warn('图片缓存写入 IndexedDB 失败，将仅在本次会话中保留');
+                    });
                     const allPages = getAllStories(library).flatMap(s => (s.pages || []));
                     const toUpload = allPages
                         .filter(p => !p.cosKey && p.file && backupData.imageData[p.file])
@@ -2852,20 +2952,15 @@ body.reader-fullscreen .stage-wrap {
         reader.readAsText(file);
     }
 
-        function restoreImageCache() {
+        // 图片 Base64 缓存已经迁到 IndexedDB，容量比 localStorage 宽裕得多，
+        // 不再需要"超过 20 张就整体丢弃"这种迫不得已的限制
+        async function restoreImageCache() {
         try {
-            const cached = localStorage.getItem(IMAGE_CACHE_KEY);
-            if (cached) {
-                const data = JSON.parse(cached);
-                // 限制恢复的数据量，防止加载卡顿或爆满
-                if (typeof data === 'object' && Object.keys(data).length < 20) {
-                    Object.keys(data).forEach(key => {
-                        sessionSrcCache[key] = data[key];
-                    });
-                } else {
-                    // 如果以前存了太多图片数据，直接清理掉，让程序重新从 CDN 加载
-                    localStorage.removeItem(IMAGE_CACHE_KEY);
-                }
+            const data = await idbGet(IMAGE_CACHE_KEY);
+            if (data && typeof data === 'object') {
+                Object.keys(data).forEach(key => {
+                    sessionSrcCache[key] = data[key];
+                });
             }
         } catch(e) {}
     }
@@ -3278,76 +3373,82 @@ body.reader-fullscreen .stage-wrap {
         return utter;
     }
 
-    function stopSpeechSoft(){
-        if('speechSynthesis' in window){
-            try { speechSynthesis.cancel(); } catch (error) { /* noop */ }
-            try { if (typeof speechSynthesis.resume === 'function') speechSynthesis.resume(); } catch (error) { /* noop */ }
-        }
-    }
-
     // 语音朗读（支持点击切换播放/停止）
-let isSpeaking = false;
-let currentUtterance = null;
+    let isSpeaking = false;
+    let currentUtterance = null;
+    let currentIndicatorEl = null;
 
-function speakOne(text, indicatorEl) {
-    if (!('speechSynthesis' in window) || !text) return;
-    
-    // 如果当前正在朗读同一个文本，则停止
-    if (isSpeaking && currentUtterance) {
+    function speakOne(text, indicatorEl) {
+        if (!('speechSynthesis' in window) || !text) return;
+
+        // 之前的 bug：只要"当前还有内容在朗读"（isSpeaking 为 true），不管这次点的
+        // 是不是同一个目标，一律直接停掉、什么都不读就 return。这导致用户连续点击
+        // 不同的绘本/不同页时，经常"点了却没声音"，必须再点一次才有反应。
+        // 现在改成：只有"再次点击同一个正在朗读的目标"（同一个 🔊 图标/同一页）
+        // 才当作"再点一次 = 停止"；点击不同目标、或者没有传 indicatorEl（比如
+        // 点整块绘本页正文），一律先停掉上一次朗读、立刻朗读这次点的新内容。
+        if (isSpeaking && indicatorEl && currentIndicatorEl === indicatorEl) {
+            stopSpeechSoft();
+            indicatorEl.classList.remove('speaking');
+            return;
+        }
+
+        const token = ++speechSessionId;
         stopSpeechSoft();
-        if (indicatorEl) indicatorEl.classList.remove('speaking');
-        return;
-    }
-    
-    const token = ++speechSessionId;
-    stopSpeechSoft();
-    const utter = makeUtterance(text);
-    currentUtterance = utter;
-    isSpeaking = true;
-    
-    const finalize = function() {
-        if (token !== speechSessionId) return;
-        isSpeaking = false;
-        currentUtterance = null;
-        if (indicatorEl) indicatorEl.classList.remove('speaking');
-    };
-    
-    if (indicatorEl) {
+        const utter = makeUtterance(text);
+        currentUtterance = utter;
+        currentIndicatorEl = indicatorEl || null;
+        isSpeaking = true;
+
+        // 看门狗：短时间内如果既没触发 onstart 也没触发 onerror，说明这次朗读大概率
+        // 静默失败了（部分浏览器偶发问题），主动复位状态，避免 isSpeaking 卡死在
+        // true，导致之后每一次点击都被上面"同一目标"的判断误拦下、始终没有声音。
+        const watchdog = setTimeout(() => {
+            if (token !== speechSessionId) return;
+            isSpeaking = false;
+            currentUtterance = null;
+            currentIndicatorEl = null;
+            if (indicatorEl) indicatorEl.classList.remove('speaking');
+        }, 3000);
+
+        const finalize = function() {
+            clearTimeout(watchdog);
+            if (token !== speechSessionId) return;
+            isSpeaking = false;
+            currentUtterance = null;
+            currentIndicatorEl = null;
+            if (indicatorEl) indicatorEl.classList.remove('speaking');
+        };
+
         utter.onstart = function() {
-            if (token === speechSessionId) {
+            clearTimeout(watchdog);
+            if (token === speechSessionId && indicatorEl) {
                 indicatorEl.classList.add('speaking');
             }
         };
         utter.onend = finalize;
         utter.onerror = finalize;
-    } else {
-        utter.onend = function() {
+
+        try {
+            speechSynthesis.speak(utter);
+        } catch (error) {
+            clearTimeout(watchdog);
             isSpeaking = false;
             currentUtterance = null;
-        };
-        utter.onerror = function() {
-            isSpeaking = false;
-            currentUtterance = null;
-        };
+            currentIndicatorEl = null;
+            if (indicatorEl) indicatorEl.classList.remove('speaking');
+        }
     }
-    
-    try {
-        speechSynthesis.speak(utter);
-    } catch (error) {
+
+    function stopSpeechSoft() {
         isSpeaking = false;
         currentUtterance = null;
-        if (indicatorEl) indicatorEl.classList.remove('speaking');
+        currentIndicatorEl = null;
+        if ('speechSynthesis' in window) {
+            try { speechSynthesis.cancel(); } catch (error) { /* noop */ }
+            try { if (typeof speechSynthesis.resume === 'function') speechSynthesis.resume(); } catch (error) { /* noop */ }
+        }
     }
-}
-
-function stopSpeechSoft() {
-    isSpeaking = false;
-    currentUtterance = null;
-    if ('speechSynthesis' in window) {
-        try { speechSynthesis.cancel(); } catch (error) { /* noop */ }
-        try { if (typeof speechSynthesis.resume === 'function') speechSynthesis.resume(); } catch (error) { /* noop */ }
-    }
-}
 
     function speakSequence(items){
         if(!('speechSynthesis' in window) || !items.length) return;
@@ -3525,16 +3626,17 @@ function stopSpeechSoft() {
     if (hint && hint.style.display !== 'none') {
         return;
     }
-    
-    treeEl.innerHTML = '';
+
     const q = searchQuery.trim().toLowerCase();
 
     if(q){
+        treeEl.innerHTML = '';
         renderSearchResults(q);
         return;
     }
 
     if(library.length === 0){
+        treeEl.innerHTML = '';
         const empty = document.createElement('div');
         empty.className = 'empty-hint';
         empty.textContent = '📖 还没有内容，点击「新建」或「批量导入绘本」或「新增绘本」开始创建';
@@ -3546,7 +3648,14 @@ function stopSpeechSoft() {
     }
 
     sortNodes(library);
-    renderNodes(library, treeEl, 0);
+    // 性能优化：先把整棵目录树在内存里的 DocumentFragment 中搭好，最后一次性
+    // 挂到真实 DOM 上，而不是对着已经在页面上、处于激活状态的 treeEl 逐个
+    // appendChild。绘本/文件夹数量一多时，逐个插入会反复触发浏览器重排
+    // （reflow），改成一次性插入能明显加快目录展开、切换文件夹时的渲染速度。
+    const fragment = document.createDocumentFragment();
+    renderNodes(library, fragment, 0);
+    treeEl.innerHTML = '';
+    treeEl.appendChild(fragment);
     }
 
     function renderNodes(nodes, container, depth){
@@ -7134,28 +7243,21 @@ nextBtn.addEventListener('click', function() {
     /* =====================================================================
    Init
    ===================================================================== */
-    // 初始化部分 - 强制从服务器加载，禁止使用本地缓存
+    // 初始化部分：优先用本地缓存"秒开"绘本目录，随后自动用服务器最新数据静默校正
     async function initApp() {
     // 强制清空所有数据
     library = [];
     collapsedNodes = new Set();
     selectedFolderId = null;
     currentStoryId = null;
-    
-    // 显示加载状态
-    showTreeLoading(true);
-    
-    // 清空本地缓存键，确保完全从服务器加载
-    const userId = localStorage.getItem(USER_ID_KEY);
-    if (userId) {
-        const scope = ':' + userId;
-        localStorage.removeItem('wib:library:v26' + scope);
-        localStorage.removeItem('wib:selectedFolder' + scope);
-        localStorage.removeItem('wib:currentStoryId' + scope);
-        localStorage.removeItem('wib:collapsed_v2' + scope);
-    }
-    
-    // 只从服务器加载
+
+    // 注意：这里不再提前清空 IndexedDB/localStorage 里的本地缓存。
+    // 之前的写法是"先清缓存、再强制只从服务器加载"，本意是防止多账号共用一个
+    // 浏览器时数据串号，但所有缓存 key 本来就带着 USER_SCOPE（当前登录用户的 ID）
+    // 后缀，天然按账号隔离，不会读到别的账号的数据，没必要每次都先清空——而且
+    // 提前清空恰好会让 loadRemoteLibrary() 里"先用缓存秒开、网络数据到达后再
+    // 静默校正"的加速逻辑完全失效，绘本目录又要变回"整屏转圈等网络返回"。
+    // 只从服务器加载（内部会自动优先尝试本地缓存进行秒开）
     await loadRemoteLibrary();
     
     // 默认不选中绘本（不自动朗读）
@@ -7195,17 +7297,10 @@ renderAll(false);
             const token = localStorage.getItem(AUTH_TOKEN_KEY);
             const userId = localStorage.getItem(USER_ID_KEY) || localStorage.getItem('tappyread_user_id');
             try {
-                const snapshot = snapshotLibraryState();
-                if (userId) {
-                    const scope = ':' + userId;
-                    const snapshotKey = 'wib:library:v26' + scope;
-                    localStorage.setItem(snapshotKey, JSON.stringify({ tree: snapshot.tree, collapsed: snapshot.collapsed }));
-                    if (snapshot.selectedFolderId) localStorage.setItem('wib:selectedFolder' + scope, snapshot.selectedFolderId);
-                    else localStorage.removeItem('wib:selectedFolder' + scope);
-                    if (snapshot.currentStoryId) localStorage.setItem('wib:currentStoryId' + scope, snapshot.currentStoryId);
-                    else localStorage.removeItem('wib:currentStoryId' + scope);
-                    localStorage.setItem('wib:collapsed_v2' + scope, JSON.stringify(snapshot.collapsed));
-                }
+                // 退出登录前的目录快照，直接交给 saveLibrary() 统一处理即可（它会把
+                // 树形数据存入 IndexedDB、把小的定位类配置存入 localStorage，并尝试
+                // 同步到云端）——这里不需要在调用 saveLibrary() 之前再手动重复写一遍，
+                // 之前重复写的那份还是用 localStorage 存整棵树，绘本一多同样会超限。
                 const saved = await saveLibrary();
                 if (!saved && token) {
                     await fetch('/api/library', {
