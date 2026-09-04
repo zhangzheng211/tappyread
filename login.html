@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+
+    <!-- 标签栏图标 -->
+    <link rel="icon" href="logo.png" type="image/png">
+    <!-- 设置浏览器标签图标 -->
+    <link rel="icon" href="logo.png" type="image/x-icon">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.5, user-scalable=yes">
+    <title>点读机 · 登录</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Nunito', sans-serif;
+            background: #FFF9F0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            background-image:
+                radial-gradient(circle at 10% 20%, rgba(255,215,150,0.20) 0%, transparent 50%),
+                radial-gradient(circle at 90% 80%, rgba(255,200,120,0.15) 0%, transparent 50%),
+                repeating-linear-gradient(45deg, transparent, transparent 40px, rgba(255,220,160,0.05) 40px, rgba(255,220,160,0.05) 80px);
+        }
+
+        /* ===== 登录卡片（增强版） ===== */
+        .login-card {
+            width: 100%;
+            max-width: 440px;
+            background: #FFFAF0;
+            border-radius: 48px 48px 32px 32px;
+            border: 4px solid #F0D5B0;
+            box-shadow: 0 12px 0 #E8D5B5, 0 20px 40px rgba(0,0,0,0.10);
+            padding: 36px 32px 40px;
+            position: relative;
+            overflow: hidden;
+            backdrop-filter: blur(2px);
+            background-image:
+                radial-gradient(circle at 20% 30%, rgba(255,215,150,0.25) 0%, transparent 60%),
+                repeating-linear-gradient(45deg, transparent, transparent 30px, rgba(255,220,160,0.04) 30px, rgba(255,220,160,0.04) 60px);
+            animation: floatCard 0.35s ease-out;
+        }
+        @keyframes floatCard {
+            from { opacity: 0; transform: translateY(10px) scale(0.98); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        .login-card::before {
+            content: '';
+            position: absolute;
+            top: -6px;
+            left: 20px;
+            right: 20px;
+            height: 12px;
+            background: repeating-conic-gradient(#FFB882 0% 25%, transparent 0% 50%) 0 0 / 16px 12px;
+            border-radius: 40px 40px 0 0;
+            opacity: 0.5;
+        }
+
+        .login-card .logo-area {
+            text-align: center;
+            margin-bottom: 24px;
+        }
+
+        .login-card .logo-area .icon-big {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-bottom: 4px;
+        }
+        .login-card .logo-area .icon-big img {
+            width: 60px;
+            height: 60px;
+            object-fit: contain;
+            display: block;
+            filter: drop-shadow(0 6px 10px rgba(93, 58, 26, 0.12));
+        }
+
+        .login-card .logo-area h1 {
+            font-family: 'Baloo 2', cursive;
+            font-size: 32px;
+            font-weight: 800;
+            color: #5D3A1A;
+            margin-top: 4px;
+            letter-spacing: 1px;
+            text-shadow: 3px 3px 0 #F0D5B0;
+        }
+        .login-card .logo-area .sub {
+            font-size: 14px;
+            font-weight: 700;
+            color: #8A7A6A;
+            background: rgba(255,215,150,0.25);
+            display: inline-block;
+            padding: 2px 20px;
+            border-radius: 40px;
+            border: 2px dashed #DBA87A;
+            margin-top: 2px;
+        }
+
+        .login-card .field {
+            margin-bottom: 18px;
+        }
+        .login-card .field label {
+            display: block;
+            font-weight: 800;
+            font-size: 15px;
+            color: #5D3A1A;
+            margin-bottom: 6px;
+            letter-spacing: 0.5px;
+        }
+        .login-card .field label .emoji {
+            margin-right: 6px;
+        }
+        .login-card .input-wrap {
+            position: relative;
+        }
+        .login-card .field input {
+            width: 100%;
+            padding: 12px 48px 12px 16px;
+            font-family: 'Nunito', sans-serif;
+            font-size: 16px;
+            font-weight: 600;
+            color: #2B2440;
+            background: #FFFCF5;
+            border: 3px solid #ECCBAE;
+            border-radius: 30px;
+            outline: none;
+            transition: all 0.15s ease;
+            box-shadow: inset 0 2px 6px rgba(200,150,100,0.06);
+        }
+        .login-card .field input:focus {
+            border-color: #4D7A9C;
+            box-shadow: 0 0 0 4px rgba(77, 122, 156, 0.12), inset 0 2px 6px rgba(200,150,100,0.06);
+        }
+        .login-card .field input.input-error {
+            border-color: #C0392B;
+            box-shadow: 0 0 0 4px rgba(192,57,43,0.08), inset 0 2px 6px rgba(200,150,100,0.06);
+        }
+        .login-card .field input::placeholder {
+            color: #B8A898;
+            font-weight: 400;
+        }
+        .login-card .toggle-password {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 30px;
+            height: 30px;
+            border: none;
+            background: transparent;
+            color: #7B6A5E;
+            cursor: pointer;
+            border-radius: 50%;
+            font-size: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.15s ease, transform 0.15s ease;
+        }
+        .login-card .toggle-password:hover {
+            background: rgba(77,122,156,0.08);
+        }
+        .login-card .toggle-password:active {
+            transform: translateY(-50%) scale(0.95);
+        }
+
+        .login-card .helper-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: -4px 0 14px;
+            gap: 12px;
+            font-size: 12px;
+            color: #866D58;
+            font-weight: 700;
+        }
+        .login-card .helper-row .remember {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .login-card .helper-row input[type="checkbox"] {
+            accent-color: #4D7A9C;
+            width: 14px;
+            height: 14px;
+        }
+
+        .login-card .login-btn {
+            width: 100%;
+            padding: 14px 20px;
+            font-family: 'Baloo 2', cursive;
+            font-size: 22px;
+            font-weight: 700;
+            color: #fff;
+            background: #4D7A9C;
+            border: 3px solid #2A5A7A;
+            border-radius: 40px;
+            cursor: pointer;
+            box-shadow: 0 6px 0 #1A3A5A;
+            transition: all 0.08s linear;
+            margin-top: 6px;
+            letter-spacing: 1px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+        .login-card .login-btn:disabled {
+            opacity: 0.9;
+            cursor: wait;
+        }
+        .login-card .login-btn:active {
+            transform: translateY(4px);
+            box-shadow: 0 2px 0 #1A3A5A;
+        }
+        .login-card .login-btn:hover:not(:disabled) {
+            background: #5A8AAC;
+        }
+        .login-card .register-btn {
+            width: 100%;
+            padding: 14px 20px;
+            font-family: 'Baloo 2', cursive;
+            font-size: 22px;
+            font-weight: 700;
+            color: #fff;
+            background: #E67E4A;
+            border: 3px solid #B9562D;
+            border-radius: 40px;
+            cursor: pointer;
+            box-shadow: 0 6px 0 #8F3D21;
+            transition: all 0.08s linear;
+            margin-top: 12px;
+            letter-spacing: 1px;
+        }
+        .login-card .register-btn:hover:not(:disabled) {
+            background: #EE9060;
+        }
+        .login-card .register-btn:active {
+            transform: translateY(4px);
+            box-shadow: 0 2px 0 #8F3D21;
+        }
+        .login-card .register-btn:disabled {
+            opacity: 0.75;
+            cursor: wait;
+        }
+        .login-card .login-btn.is-loading {
+            background: #3E8E5A;
+            border-color: #245c37;
+            box-shadow: 0 6px 0 #1c4a2c;
+        }
+        .login-card .login-btn .spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255,255,255,0.55);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            display: none;
+        }
+        .login-card .login-btn.is-loading .spinner {
+            display: inline-block;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .login-card .error-msg {
+            color: #C0392B;
+            font-weight: 700;
+            font-size: 14px;
+            text-align: center;
+            margin-top: 12px;
+            min-height: 24px;
+            padding: 4px 12px;
+            border-radius: 30px;
+            background: rgba(192, 57, 43, 0.06);
+            border: 2px solid rgba(192, 57, 43, 0.10);
+            display: none;
+        }
+        .login-card .error-msg.show {
+            display: block;
+        }
+        .login-card .error-msg.success {
+            color: #2A7A4A;
+            background: rgba(62, 142, 90, 0.08);
+            border-color: rgba(62, 142, 90, 0.20);
+        }
+
+        .login-card .footer-note {
+            text-align: center;
+            font-size: 12px;
+            font-weight: 600;
+            color: #B08868;
+            margin-top: 16px;
+            border-top: 2px dashed #E8D5B5;
+            padding-top: 14px;
+            letter-spacing: 0.5px;
+        }
+        .login-card .footer-note span {
+            display: inline-block;
+            animation: twinkle 2s infinite alternate;
+        }
+        @keyframes twinkle {
+            0% { opacity: 0.6; transform: scale(0.95); }
+            100% { opacity: 1; transform: scale(1.05); }
+        }
+
+        @media (max-width: 500px) {
+            .login-card {
+                padding: 28px 20px 32px;
+                border-radius: 36px 36px 24px 24px;
+            }
+            .login-card .logo-area h1 {
+                font-size: 26px;
+            }
+            .login-card .logo-area .icon-big img {
+                width: 48px;
+                height: 48px;
+            }
+            .login-card .field input {
+                padding: 10px 42px 10px 14px;
+                font-size: 15px;
+            }
+            .login-card .login-btn {
+                font-size: 18px;
+                padding: 12px 16px;
+            }
+            .login-card .register-btn {
+                font-size: 18px;
+                padding: 12px 16px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- ===== 登录卡片 ===== -->
+    <div class="login-card" id="loginCard">
+        <!-- 圆点装饰由伪元素生成 -->
+
+        <div class="logo-area">
+            <!-- Logo 图片 - 在标题正上方居中显示 -->
+            <span class="icon-big">
+                <img src="logo.png" alt="tappyread logo">
+            </span>
+            <h1>tappyread</h1>
+            <h1>点读机</h1>
+            <div class="sub">✨ 精读版 · 登录 ✨</div>
+        </div>
+
+        <!-- 用户名 -->
+        <div class="field">
+            <label><span class="emoji">👤</span> 用户名</label>
+            <div class="input-wrap">
+                <input type="text" id="usernameInput" placeholder="请输入用户名" autocomplete="username">
+            </div>
+        </div>
+
+        <!-- 密码 -->
+        <div class="field">
+            <label><span class="emoji">🔒</span> 密码</label>
+            <div class="input-wrap">
+                <input type="password" id="passwordInput" placeholder="请输入密码" autocomplete="current-password">
+                <button type="button" class="toggle-password" id="togglePassword" aria-label="显示或隐藏密码">👁️</button>
+            </div>
+        </div>
+
+        <div class="helper-row">
+            <label class="remember"><input type="checkbox" id="rememberUser"> 记住账号</label>
+        </div>
+
+        <!-- 错误提示 -->
+        <div class="error-msg" id="errorMsg">❌ 用户名或密码错误，请重试</div>
+
+        <!-- 登录按钮 -->
+        <button class="login-btn" id="loginBtn" type="button">
+            <span class="spinner" aria-hidden="true"></span>
+            <span class="btn-text">🔓 登 录</span>
+        </button>
+        <button class="register-btn" id="registerBtn" type="button">注册新账号登录</button>
+
+        <div class="footer-note">
+            <span>🌟</span> 用自己拥有的图片，一分钟制作一本点读书 <span>🌟</span>
+        </div>
+    </div>
+
+    <script>
+        (function() {
+            const usernameInput = document.getElementById('usernameInput');
+            const passwordInput = document.getElementById('passwordInput');
+            const loginBtn = document.getElementById('loginBtn');
+            const errorMsg = document.getElementById('errorMsg');
+            const togglePassword = document.getElementById('togglePassword');
+            const rememberUser = document.getElementById('rememberUser');
+            const btnText = loginBtn.querySelector('.btn-text');
+            const REDIRECT_URL = 'tappyread.html';
+            const API_BASE = '/api';
+            const AUTH_TOKEN_KEY = 'tappyread_auth_token';
+            const registerBtn = document.getElementById('registerBtn');
+            let isSubmitting = false;
+
+            function setInputError(input, hasError) {
+                input.classList.toggle('input-error', hasError);
+            }
+
+            function setError(message, isSuccess = false) {
+                errorMsg.textContent = message;
+                errorMsg.classList.toggle('show', Boolean(message));
+                errorMsg.classList.toggle('success', isSuccess);
+                errorMsg.style.color = isSuccess ? '#2A7A4A' : '#C0392B';
+                errorMsg.style.background = isSuccess ? 'rgba(62, 142, 90, 0.08)' : 'rgba(192, 57, 43, 0.06)';
+                errorMsg.style.borderColor = isSuccess ? 'rgba(62, 142, 90, 0.20)' : 'rgba(192, 57, 43, 0.10)';
+            }
+
+            function redirectToMainPage() {
+                window.location.href = REDIRECT_URL;
+            }
+
+            async function handleLogin() {
+                if (isSubmitting) return;
+
+                const username = usernameInput.value.trim();
+                const password = passwordInput.value.trim();
+
+                setInputError(usernameInput, false);
+                setInputError(passwordInput, false);
+                setError('');
+
+                if (!username) {
+                    setInputError(usernameInput, true);
+                    setError('⚠️ 请输入用户名');
+                    usernameInput.focus();
+                    return;
+                }
+                if (!password) {
+                    setInputError(passwordInput, true);
+                    setError('⚠️ 请输入密码');
+                    passwordInput.focus();
+                    return;
+                }
+
+                isSubmitting = true;
+                loginBtn.disabled = true;
+                loginBtn.classList.add('is-loading');
+                btnText.textContent = '登录中...';
+
+                let loginResponse;
+                try {
+                    loginResponse = await fetch(`${API_BASE}/auth/login`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'include',
+                        body: JSON.stringify({ username, password })
+                    });
+                } catch (error) {
+                    loginResponse = null;
+                }
+
+                let loginData = null;
+                try {
+                    loginData = loginResponse ? await loginResponse.json() : null;
+                } catch (error) {
+                    loginData = null;
+                }
+
+                if (!loginResponse || !loginResponse.ok || !loginData?.token) {
+                    loginBtn.classList.remove('is-loading');
+                    loginBtn.disabled = false;
+                    btnText.textContent = '🔓 登 录';
+                    isSubmitting = false;
+                    setInputError(usernameInput, true);
+                    setInputError(passwordInput, true);
+                    setError(loginData?.error || '❌ 登录服务不可用，请确认 Vercel API 已部署');
+                    passwordInput.focus();
+                    passwordInput.select();
+                    return;
+                }
+
+                localStorage.setItem(AUTH_TOKEN_KEY, loginData.token);
+                // 保存当前登录用户名与用户 ID：绘本目录等数据按用户 ID 隔离存储，账户信息必须显示当前登录用户
+                if (loginData.userId) localStorage.setItem('tappyread_user_id', loginData.userId);
+                if (loginData.username) localStorage.setItem('tappyread_username', loginData.username);
+
+                if (rememberUser.checked) {
+                    localStorage.setItem('tappyread_last_user', username);
+                } else {
+                    localStorage.removeItem('tappyread_last_user');
+                }
+
+                setError('✅ 登录成功，正在跳转...', true);
+                setTimeout(() => {
+                    redirectToMainPage();
+                }, 400);
+            }
+
+            async function handleRegister() {
+                const username = usernameInput.value.trim();
+                const password = passwordInput.value.trim();
+                if (!username || !password) return setError('⚠️ 注册需要填写用户名和密码');
+                if (password.length < 6) return setError('⚠️ 密码至少需要 6 位');
+                registerBtn.disabled = true;
+                try {
+                    const response = await fetch(`${API_BASE}/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ username, password }) });
+                    const data = await response.json();
+                    if (!response.ok || !data.token) throw new Error(data.error || '注册失败');
+                    localStorage.setItem(AUTH_TOKEN_KEY, data.token);
+                    // 保存当前登录用户名与用户 ID：绘本目录等数据按用户 ID 隔离存储，账户信息必须显示当前登录用户
+                    if (data.userId) localStorage.setItem('tappyread_user_id', data.userId);
+                    if (data.username) localStorage.setItem('tappyread_username', data.username);
+                    localStorage.setItem('tappyread_last_user', username);
+                    rememberUser.checked = true;
+                    setError('✅ 注册成功，正在进入首页...', true);
+                    setTimeout(redirectToMainPage, 400);
+                } catch (error) {
+                    const message = error.message || '注册失败';
+                    setError(message === '用户名已存在，请修改用户名重试！' ? message : `❌ ${message}`);
+                } finally {
+                    registerBtn.disabled = false;
+                }
+            }
+
+            const savedUser = localStorage.getItem('tappyread_last_user');
+            if (savedUser) {
+                usernameInput.value = savedUser;
+                rememberUser.checked = true;
+            }
+
+            loginBtn.addEventListener('click', handleLogin);
+            registerBtn.addEventListener('click', handleRegister);
+
+            usernameInput.addEventListener('input', () => {
+                if (errorMsg.classList.contains('show')) {
+                    setError('');
+                }
+                setInputError(usernameInput, false);
+            });
+
+            passwordInput.addEventListener('input', () => {
+                if (errorMsg.classList.contains('show')) {
+                    setError('');
+                }
+                setInputError(passwordInput, false);
+            });
+
+            usernameInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    passwordInput.focus();
+                }
+            });
+
+            passwordInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleLogin();
+                }
+            });
+
+            togglePassword.addEventListener('click', function() {
+                const isPassword = passwordInput.type === 'password';
+                passwordInput.type = isPassword ? 'text' : 'password';
+                togglePassword.textContent = isPassword ? '🙈' : '👁️';
+                togglePassword.setAttribute('aria-label', isPassword ? '隐藏密码' : '显示密码');
+                passwordInput.focus();
+            });
+        })();
+    </script>
+
+</body>
+</html>
