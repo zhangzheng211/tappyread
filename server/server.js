@@ -46,7 +46,7 @@ const COS_BASE_URL = `https://${COS_BUCKET}.cos.${COS_REGION}.myqcloud.com/`;
 
 const cosConfigured = Boolean(process.env.COS_SECRET_ID && process.env.COS_SECRET_KEY);
 const cosClient = cosConfigured
-  ? new COS({ SecretId: process.env.COS_SECRET_ID, SecretKey: process.env.COS_SECRET_KEY, Timeout: 8000 })
+  ? new COS({ SecretId: process.env.COS_SECRET_ID, SecretKey: process.env.COS_SECRET_KEY })
   : null;
 
 function sendCosConfigError(res) {
@@ -376,6 +376,60 @@ app.post('/api/auth/logout', authenticate, async (req, res) => {
   }
 });
 
+/* =====================================================================
+   前端直传 COS 支持（终极上传方案）：
+   文件体不经过后端，浏览器通过 cos-js-sdk-v5 直连 COS。
+   后端只提供两个轻量接口：配置（不含密钥）+ 按请求实时签名。
+   密钥始终留在服务端，安全性等同后端中转，但大文件不再受
+   Vercel Serverless 4.5MB 请求体上限与函数时长限制。
+   ===================================================================== */
+
+/* 直传配置：桶名/地域/当前用户目录 JSON 键（不含任何密钥） */
+app.get('/api/cos/config', authenticate, (req, res) => {
+  const safeUsername = sanitizeUsername(req.user.username).replace(/_+$/g, '') || 'guest';
+  res.json({
+    enabled: cosConfigured,
+    bucket: COS_BUCKET,
+    region: COS_REGION,
+    userId: req.user.id,
+    username: req.user.username,
+    jsonKey: `${COS_JSON_DIR}/${safeUsername}.json`,
+    imgDir: COS_IMG_DIR,
+    htmlDir: COS_HTML_DIR
+  });
+});
+
+/* 实时签名：仅允许当前用户自己的对象键，防越权 */
+app.get('/api/cos/auth', authenticate, (req, res) => {
+  if (!cosConfigured) return sendCosConfigError(res);
+  const method = String(req.query.method || 'get').toUpperCase();
+  const key = String(req.query.key || '').trim();
+  if (!key) return res.status(400).json({ error: '缺少 key 参数' });
+
+  const safeUsername = sanitizeUsername(req.user.username).replace(/_+$/g, '') || 'guest';
+  const allowed =
+    key.startsWith(`${COS_IMG_DIR}/u${req.user.id}_`) ||
+    key.startsWith(`${COS_HTML_DIR}/u${req.user.id}_`) ||
+    key === `${COS_JSON_DIR}/${safeUsername}.json`;
+  if (!allowed) return res.status(403).json({ error: '无权访问该 COS 路径' });
+
+  let query;
+  let headers;
+  try { query = req.query.query ? JSON.parse(req.query.query) : undefined; } catch (e) { query = undefined; }
+  try { headers = req.query.headers ? JSON.parse(req.query.headers) : undefined; } catch (e) { headers = undefined; }
+
+  const authorization = cosClient.getAuth({
+    Bucket: COS_BUCKET,
+    Region: COS_REGION,
+    Method: method,
+    Key: key,
+    Expires: 600,
+    Query: query,
+    Headers: headers
+  });
+  res.json({ Authorization: authorization });
+});
+
 app.get('/api/library', authenticate, async (req, res) => {
   try {
     if (!cosConfigured) return res.json({ tree: [], collapsed: [], selectedFolderId: null, currentStoryId: null });
@@ -409,6 +463,21 @@ app.put('/api/library', authenticate, async (req, res) => {
     res.json({ ok: true, key: result.key, url: result.url });
   } catch (error) {
     sendDatabaseError(res, error);
+  }
+});
+
+/* 前端直传完成后的轻量收尾：清理该用户旧版命名的目录文件（不携带目录数据） */
+app.post('/api/library', authenticate, async (req, res) => {
+  try {
+    if (!cosConfigured) return res.json({ ok: true, note: 'COS 未配置，跳过清理' });
+    const allKeys = await listCosKeys(`${COS_JSON_DIR}/`);
+    const staleKeys = getLegacyLibraryKeysForUsername(req.user.username, allKeys)
+      .filter(key => key !== `${COS_JSON_DIR}/${sanitizeUsername(req.user.username).replace(/_+$/g, '') || 'guest'}.json`);
+    if (staleKeys.length) await deleteCosObjects(staleKeys.slice(0, 50));
+    res.json({ ok: true, cleaned: staleKeys.length });
+  } catch (error) {
+    console.warn('清理旧版绘本目录文件失败（不影响直传结果）:', error);
+    res.json({ ok: true, cleaned: 0 });
   }
 });
 

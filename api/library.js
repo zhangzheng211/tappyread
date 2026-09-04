@@ -228,6 +228,22 @@ export default async function handler(req, res) {
       return sendJson(res, 200, { tree: [], collapsed: [], selectedFolderId: null, currentStoryId: null });
     }
 
+    if (req.method === 'POST') {
+      // 前端直传 COS 完成后的轻量收尾：清理该用户旧版命名的目录文件（不携带目录数据）
+      if (!cosConfigured) return sendJson(res, 200, { ok: true, note: 'COS 未配置，跳过清理' });
+      try {
+        const allKeys = await listCosKeys(`${COS_JSON_DIR}/`);
+        const safeUsername = sanitizeUsername(user.username).replace(/_+$/g, '') || 'guest';
+        const staleKeys = getLegacyLibraryKeysForUsername(user.username, allKeys)
+          .filter(key => key !== `${COS_JSON_DIR}/${safeUsername}.json`);
+        if (staleKeys.length) await deleteCosObjects(staleKeys.slice(0, 50));
+        return sendJson(res, 200, { ok: true, cleaned: staleKeys.length });
+      } catch (cleanupError) {
+        console.warn('清理旧版绘本目录文件失败（不影响直传结果）:', cleanupError);
+        return sendJson(res, 200, { ok: true, cleaned: 0 });
+      }
+    }
+
     if (req.method === 'PUT') {
       if (!cosConfigured) return sendCosConfigError(res);
       const { tree, collapsed } = req.body || {};

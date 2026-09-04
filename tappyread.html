@@ -1650,6 +1650,8 @@ body.reader-fullscreen .stage-wrap {
     </div>
 </div>
 
+<!-- 前端直传腾讯云 COS 所需的浏览器 SDK（本地 vendor，不依赖外部 CDN 可用性） -->
+<script src="vendor/cos-js-sdk-v5.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
     /* =====================================================================
@@ -1943,20 +1945,128 @@ body.reader-fullscreen .stage-wrap {
     const COS_BASE = 'https://tappyreadjpeg-1325106148.cos.ap-guangzhou.myqcloud.com/';
     let cosUploadChain = Promise.resolve(); // 全局串行上传链，避免并发风暴打爆服务器
 
-    // 单张图片异步上传到 COS，成功返回 {key,url}，失败返回 null（不阻塞导入流程）
-    async function uploadPageImageToCos(fileName, dataUrl){
-        if(!dataUrl || !/^data:image\//i.test(dataUrl)) return null;
+    /* =====================================================================
+       ===== 腾讯云 COS 前端直传（终极方案） =====
+       文件体不再经过后端/Vercel 中转，浏览器通过 cos-js-sdk-v5 直接与 COS 通信，
+       彻底绕开 Vercel Serverless 4.5MB 请求体上限与函数时长限制。
+       后端仅提供两个轻量接口：
+         GET /api/cos/config —— 返回桶名/地域/当前用户目录 JSON 键（不含密钥）
+         GET /api/cos/auth   —— 按请求的 Method+Key 计算签名（密钥只留在服务端）
+       密钥永不下发到前端，安全性与"后端中转"等价，但大文件不再受限。
+       ===================================================================== */
+    const COS_DIRECT = { config: null, client: null, unavailable: false };
+
+    // 与后端 sanitizeFileName 保持一致的文件名清洗
+    function sanitizeNameForCos(name){
+        const base = String(name || 'file').split(/[\\/]/).pop();
+        return base.replace(/[^\w.\-\u4e00-\u9fa5]/g, '_').slice(0, 120) || 'file';
+    }
+
+    // base64 dataURL → Blob（直传需要二进制体）
+    function dataUrlToBlob(dataUrl){
         try {
-            const res = await fetch(API_BASE + '/upload/image', {
+            const m = String(dataUrl).match(/^data:([\w/+.-]+);base64,(.*)$/);
+            if(!m) return null;
+            const bin = atob(m[2]);
+            const bytes = new Uint8Array(bin.length);
+            for(let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+            return new Blob([bytes], { type: m[1] });
+        } catch(e) { return null; }
+    }
+
+    // 懒加载直传客户端：先取配置，再创建带 getAuthorization 的 SDK 实例
+    async function getCosDirectClient(){
+        if(COS_DIRECT.unavailable) return null;
+        if(COS_DIRECT.client) return COS_DIRECT.client;
+        if(typeof COS === 'undefined' || !COS) { COS_DIRECT.unavailable = true; return null; }
+        try {
+            const res = await fetch(API_BASE + '/cos/config', {
+                headers: { Authorization: 'Bearer ' + __authToken },
+                credentials: 'include'
+            });
+            if(!res.ok){ COS_DIRECT.unavailable = true; return null; }
+            const cfg = await res.json();
+            if(!cfg || !cfg.enabled || !cfg.bucket || !cfg.region){
+                COS_DIRECT.unavailable = true;
+                return null;
+            }
+            COS_DIRECT.config = cfg;
+            COS_DIRECT.client = new COS({
+                getAuthorization: function(options, callback){
+                    const qs = new URLSearchParams({
+                        method: options.Method || 'get',
+                        key: options.Key || ''
+                    });
+                    try {
+                        if(options.Query && Object.keys(options.Query).length) qs.set('query', JSON.stringify(options.Query));
+                        if(options.Headers && Object.keys(options.Headers).length) qs.set('headers', JSON.stringify(options.Headers));
+                    } catch(e) {}
+                    fetch(API_BASE + '/cos/auth?' + qs.toString(), {
+                        headers: { Authorization: 'Bearer ' + __authToken },
+                        credentials: 'include'
+                    })
+                        .then(r => r.ok ? r.json() : Promise.reject(new Error('签名接口 ' + r.status)))
+                        .then(d => {
+                            if(d && d.Authorization) callback({ Authorization: d.Authorization });
+                            else callback({ error: '签名响应缺少 Authorization' });
+                        })
+                        .catch(err => callback({ error: (err && err.message) || '签名获取失败' }));
+                }
+            });
+            return COS_DIRECT.client;
+        } catch(e) {
+            console.warn('COS 直传客户端初始化失败，回退后端中转：', e);
+            COS_DIRECT.unavailable = true;
+            return null;
+        }
+    }
+
+    // 直传对象到 COS（浏览器 → COS，不经后端）
+    function cosPutDirect(key, body, contentType, onProgress){
+        return new Promise(async (resolve, reject) => {
+            let client;
+            try { client = await getCosDirectClient(); } catch(e) { return reject(e); }
+            if(!client || !COS_DIRECT.config) return reject(new Error('COS 直传不可用'));
+            client.putObject({
+                Bucket: COS_DIRECT.config.bucket,
+                Region: COS_DIRECT.config.region,
+                Key: key,
+                Body: body,
+                ContentType: contentType || 'application/octet-stream',
+                onProgress: typeof onProgress === 'function' ? onProgress : undefined
+            }, function(err){
+                if(err) return reject(err);
+                resolve({ key, url: COS_BASE + key });
+            });
+        });
+    }
+
+    // 从 COS 直读文本对象（签名 GET，私桶也能读；目录 JSON 加载用）
+    function cosGetDirectText(key){
+        return new Promise(async (resolve, reject) => {
+            let client;
+            try { client = await getCosDirectClient(); } catch(e) { return reject(e); }
+            if(!client || !COS_DIRECT.config) return reject(new Error('COS 直传不可用'));
+            client.getObject({
+                Bucket: COS_DIRECT.config.bucket,
+                Region: COS_DIRECT.config.region,
+                Key: key,
+                DataType: 'text'
+            }, function(err, data){
+                if(err) return reject(err);
+                resolve(data && data.Body ? String(data.Body) : '');
+            });
+        });
+    }
+
+    // 旧版后端中转上传（保留为降级通道：直传不可用时兜底）
+    async function relayUploadToCos(endpoint, payload){
+        try {
+            const res = await fetch(API_BASE + endpoint, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': 'Bearer ' + __authToken
-                },
-                body: JSON.stringify({
-                    fileName: fileName || 'page.jpg',
-                    dataUrl: dataUrl
-                })
+                headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + __authToken },
+                credentials: 'include',
+                body: JSON.stringify(payload)
             });
             if(!res.ok) return null;
             const data = await res.json();
@@ -1966,17 +2076,48 @@ body.reader-fullscreen .stage-wrap {
         }
     }
 
+    // 单张图片异步上传到 COS：优先浏览器直传，失败回退后端中转。成功返回 {key,url}
+    async function uploadPageImageToCos(fileName, dataUrl, onProgress){
+        if(!dataUrl || !/^data:image\//i.test(dataUrl)) return null;
+        const blob = dataUrlToBlob(dataUrl);
+        if(blob){
+            try {
+                const key = 'jpeg/u' + __userId + '_' + Date.now() + '_' + sanitizeNameForCos(fileName || 'page.jpg');
+                return await cosPutDirect(key, blob, blob.type || 'image/jpeg', onProgress);
+            } catch(e) {
+                console.warn('图片 COS 直传失败，回退后端中转：', e);
+            }
+        }
+        return relayUploadToCos('/upload/image', {
+            fileName: fileName || 'page.jpg',
+            dataUrl: dataUrl
+        });
+    }
+
     // 将一批图片串行异步上传到 COS，返回 [{file, cosKey}]，cosKey 为 null 表示该张上传失败
-    function uploadPagesToCos(items){
+    function uploadPagesToCos(items, onItemProgress){
         const results = [];
         const pending = (items || []).filter(p => p && p.dataUrl);
         cosUploadChain = cosUploadChain.then(async () => {
             for(const p of pending){
-                const r = await uploadPageImageToCos(p.file, p.dataUrl);
+                const r = await uploadPageImageToCos(p.file, p.dataUrl, onItemProgress);
                 results.push({ file: p.file, cosKey: r ? r.key : null });
+                if(typeof onItemProgress === 'function') onItemProgress(results.length, pending.length, p.file);
             }
         });
         return cosUploadChain.then(() => results);
+    }
+
+    // HTML 文件直传 COS html/ 目录：优先浏览器直传，失败回退后端中转
+    async function uploadHtmlFileToCos(fileName, source) {
+        if (!source || !String(fileName || '').trim()) return null;
+        try {
+            const key = 'html/u' + __userId + '_' + Date.now() + '_' + sanitizeNameForCos(fileName || 'page.html');
+            return await cosPutDirect(key, source, 'text/html; charset=utf-8');
+        } catch (error) {
+            console.warn('HTML COS 直传失败，回退后端中转：', error);
+            return relayUploadToCos('/upload/html', { fileName: fileName || 'page.html', source });
+        }
     }
 
     // 核心图片加载函数：兼容本地目录和腾讯云COS
@@ -2107,6 +2248,36 @@ body.reader-fullscreen .stage-wrap {
             }
             const token = localStorage.getItem(AUTH_TOKEN_KEY);
             if(token){
+                // 优先：前端直传 COS。目录 JSON 不再经过后端/Vercel 中转，
+                // 突破 Vercel Serverless 4.5MB 请求体上限（6MB+ 目录因此失败过的根因）
+                const directClient = await getCosDirectClient().catch(() => null);
+                if(directClient && COS_DIRECT.config && COS_DIRECT.config.jsonKey){
+                    try {
+                        const payload = {
+                            username: COS_DIRECT.config.username,
+                            updatedAt: new Date().toISOString(),
+                            tree: Array.isArray(snapshot.tree) ? snapshot.tree : [],
+                            collapsed: Array.isArray(snapshot.collapsed) ? snapshot.collapsed : [],
+                            selectedFolderId: snapshot.selectedFolderId || null,
+                            currentStoryId: snapshot.currentStoryId || null
+                        };
+                        await cosPutDirect(
+                            COS_DIRECT.config.jsonKey,
+                            JSON.stringify(payload, null, 2),
+                            'application/json; charset=utf-8'
+                        );
+                        // 轻量请求：让后端顺手清理旧版命名的目录文件（不携带目录数据）
+                        fetch(API_BASE + '/library', {
+                            method: 'POST',
+                            headers: { Authorization: `Bearer ${token}` },
+                            credentials: 'include'
+                        }).catch(() => {});
+                        return true;
+                    } catch(directErr) {
+                        console.warn('目录 COS 直传失败，回退后端中转：', directErr);
+                    }
+                }
+                // 降级：后端中转（直传不可用时兜底）
                 const response = await fetch(`${API_BASE}/library`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -2228,29 +2399,59 @@ body.reader-fullscreen .stage-wrap {
     // 显示加载状态
     showTreeLoading(true);
 
-    // 前端超时兜底：原生 fetch 没有默认超时，网络异常/服务端很慢时会一直挂着，
-    // "绘本目录加载中……"就会永远显示。这里用 AbortController 设置 12 秒超时，
-    // 超时后主动放弃这次请求，给用户一个"加载超时，点击重试"的提示，而不是无限等待。
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 12000);
-
     try{
-        const response = await fetch(`${API_BASE}/library`, {
-            headers: { Authorization: `Bearer ${token}` },
-            credentials: 'include',
-            signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-        if(response.status === 401){
-            localStorage.removeItem(AUTH_TOKEN_KEY);
-            localStorage.removeItem(USER_ID_KEY);
-            localStorage.removeItem('tappyread_last_user');
-            location.replace('index.html');
-            return;
+        // 优先：从 COS 直读目录 JSON（签名 GET）。6MB+ 的大目录不再经后端/Vercel 中转，
+        // 彻底绕开 Serverless 请求/响应体积限制，加载速度也更快（浏览器到 COS 直连）。
+        let data = null;
+        const directClient = await getCosDirectClient().catch(() => null);
+        if(directClient && COS_DIRECT.config && COS_DIRECT.config.jsonKey){
+            try {
+                const text = await cosGetDirectText(COS_DIRECT.config.jsonKey);
+                if(text){
+                    const parsed = JSON.parse(text);
+                    if(parsed && Array.isArray(parsed.tree)) data = parsed;
+                }
+            } catch(e) {
+                // 404 = 该用户在 COS 上还没有目录文件（新用户），走后端兼容旧版命名加载；
+                // 其他错误（网络等）同样降级到后端通道，保证加载永远有兜底。
+                console.warn('COS 直读目录失败，改走后端加载：', e);
+            }
         }
-        if(!response.ok) throw new Error(`目录加载失败: ${response.status}`);
-        const data = await response.json();
-        
+
+        if(!data){
+            // 前端超时兜底：原生 fetch 没有默认超时，网络异常/服务端很慢时会一直挂着，
+            // "绘本目录加载中……"就会永远显示。这里用 AbortController 设置 12 秒超时，
+            // 超时后主动放弃这次请求，给用户一个"加载超时，点击重试"的提示，而不是无限等待。
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 12000);
+            try {
+                const response = await fetch(`${API_BASE}/library`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                    credentials: 'include',
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+                if(response.status === 401){
+                    localStorage.removeItem(AUTH_TOKEN_KEY);
+                    localStorage.removeItem(USER_ID_KEY);
+                    localStorage.removeItem('tappyread_last_user');
+                    location.replace('index.html');
+                    return;
+                }
+                if(!response.ok) throw new Error(`目录加载失败: ${response.status}`);
+                const serverData = await response.json();
+                data = {
+                    tree: serverData.tree,
+                    collapsed: serverData.collapsed,
+                    selectedFolderId: serverData.selectedFolderId,
+                    currentStoryId: serverData.currentStoryId
+                };
+            } catch(relayError) {
+                clearTimeout(timeoutId);
+                throw relayError;
+            }
+        }
+
         // 直接使用服务器数据
         if(Array.isArray(data.tree) && data.tree.length > 0){
             library = data.tree;
@@ -2292,7 +2493,6 @@ body.reader-fullscreen .stage-wrap {
         renderTree();
         renderAll(false);
     }catch(error){
-        clearTimeout(timeoutId);
         console.error('加载绘本目录失败，请检查网络', error);
         if(error && error.name === 'AbortError'){
             // 超时：保留"加载中"提示，额外露出"重试"按钮，不要清空成空状态，
@@ -2916,7 +3116,7 @@ body.reader-fullscreen .stage-wrap {
         if(!confirm(`确定要删除绘本《${story.title}》吗？此操作不可恢复。`)) return;
 
         const cosKeys = Array.from(new Set((story.pages || [])
-            .flatMap(p => [p.cosKey, p.htmlCosKey])
+            .flatMap(p => [p.cosKey, p.htmlCosKey, p.fileCosKey])
             .filter(Boolean)));
         if (cosKeys.length > 0) {
             deleteCosKeys(cosKeys);
@@ -3613,6 +3813,7 @@ function stopSpeechSoft() {
         if(!confirm(`确定要删除第 ${pageIdx+1} 页吗？`)) return;
         const removedPage = story.pages[pageIdx];
         const relatedKeys = [removedPage?.cosKey, removedPage?.htmlCosKey].filter(Boolean);
+        // 注意：fileCosKey 是整本原始文件的对象键，删除单页时不能删它（其他页还要用）
         if (relatedKeys.length > 0) {
             deleteCosKeys(relatedKeys);
         }
@@ -3731,8 +3932,12 @@ function stopSpeechSoft() {
             const frame = document.createElement('iframe');
             frame.title = page.text || ('第 ' + (globalIndex + 1) + ' 页');
             frame.setAttribute('sandbox', 'allow-scripts');
+            // 渲染优先级（与原始逻辑一致）：内联 html 优先 → 兼容直传版旧数据的 htmlCosKey → 本地目录文件
             if (page.html) {
                 frame.srcdoc = ensureHtmlPointReader(page.html);
+            } else if (page.htmlCosKey) {
+                // 兼容：此前直传版生成的绘本目录里只有 htmlCosKey 引用、没有内联 html
+                frame.src = COS_BASE + page.htmlCosKey;
             } else {
                 const htmlFile = String(page.file || '').trim();
                 frame.src = htmlFile ? resolveFileFromDir(getPageSourceDir(page), htmlFile) : '';
@@ -5912,25 +6117,7 @@ nextBtn.addEventListener('click', function() {
         return chunks.length ? chunks : [serializeNode(cleanNode)];
     }
 
-    async function uploadHtmlFileToCos(fileName, source) {
-        if (!source || !String(fileName || '').trim()) return null;
-        try {
-            const response = await fetch(API_BASE + '/upload/html', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': 'Bearer ' + __authToken
-                },
-                body: JSON.stringify({ fileName: fileName || 'page.html', source })
-            });
-            if (!response.ok) return null;
-            const data = await response.json();
-            return (data && data.ok && data.url) ? { key: data.key, url: data.url } : null;
-        } catch (error) {
-            console.warn('HTML 上传失败，回退到本地读取：', error);
-            return null;
-        }
-    }
+    // uploadHtmlFileToCos 已上移到 COS 直传区块（优先浏览器直传，回退后端中转）
 
     async function analyzeHtmlFiles(files, onProgress) {
         const htmlFiles = Array.from(files).filter(file => /\.html?$/i.test(file.name));
@@ -6439,14 +6626,19 @@ nextBtn.addEventListener('click', function() {
                 }
                 const story = { id: genId(), type: 'story', title: group.name, builtin: false, pages: [], sortKey: Infinity };
                 group.pages.forEach(page => {
+                    // ===== 还原原始逻辑：不再逐页上传裁剪后的 HTML 到 COS =====
+                    // 裁剪出的每一页直接内联保存进目录，渲染时注入点读脚本后 srcdoc 显示；
+                    // htmlCosKey 保留为"分析阶段整文件上传"的对象键（仅删除绘本时清理用，不用于渲染）。
                     story.pages.push({
                         file: page.file.name,
                         text: page.text,
-                        html: page.html,
+                        html: page.html || '',
                         htmlCosKey: page.htmlCosKey || null
                     });
                     processed++;
                     logProgress(`  ✅ 第 ${story.pages.length} 页: ${page.file.name}${page.text ? ' → "' + page.text.substring(0, 30) + (page.text.length > 30 ? '...' : '') + '"' : '（无文字）'}`);
+                    progressFill.style.width = (totalPages ? Math.round(processed / totalPages * 100) : 100) + '%';
+                    processedCountEl.textContent = processed;
                 });
                 if (story.pages.length > 0) {
                     parentNodes.push(story);
