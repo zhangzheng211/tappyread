@@ -5202,28 +5202,6 @@ let wordCard = null;
 let wordCardRequestId = 0;
 const wordCardPendingRequests = new Map();
 
-// 获取当前真正处于全屏状态的元素（没有则返回 document.body）。
-// ⚠️ 之前的 bug：只在"第一次显示单词卡片"时判断一次全屏元素，并把卡片
-// 永久挂在那个父节点下。但用户很可能先在非全屏状态下点过一次单词
-// （此时卡片被挂到了 document.body 上），之后再进入全屏阅读——浏览器的
-// 全屏 Top Layer 规则下，全屏元素之外的内容（包括挂在 body 下的卡片）
-// 根本不会被绘制，于是就出现了"全屏时单词提示卡片偶尔不显示"：偶发是
-// 因为只有当卡片恰好第一次是在全屏状态下创建时才碰巧正常。
-// 修复方式：不再只在创建时判断一次，而是每次显示卡片前都重新检查当前
-// 全屏状态，如果卡片所在的父节点不对，就把它挪到正确的父节点下。
-function getFullscreenContainer() {
-    const fullscreenEl = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement;
-    return fullscreenEl || document.body;
-}
-
-function ensureWordCardParent() {
-    if (!wordCard) return;
-    const targetParent = getFullscreenContainer();
-    if (wordCard.parentNode !== targetParent) {
-        targetParent.appendChild(wordCard);
-    }
-}
-
 // 显示单词卡片
 function showWordInfo(event, wordElement) {
     const text = wordElement.textContent.trim();
@@ -5232,11 +5210,14 @@ function showWordInfo(event, wordElement) {
     // 清除之前的卡片
     hideWordCard();
     
-        // 创建卡片（只需要创建一次 DOM 节点，具体挂载到哪个父节点由
-        // ensureWordCardParent() 在每次显示时动态决定，而不是只判断一次）
+        // 创建卡片
     if (!wordCard) {
         wordCard = document.createElement('div');
         wordCard.className = 'tappy-word-card';
+        // 🚨 核心修复：将卡片追加到真正的全屏元素内（而不是body），这样它就不会被Top Layer挡住！
+        const fullscreenEl = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement;
+        const targetParent = fullscreenEl || document.body; 
+        targetParent.appendChild(wordCard);
         
         if (!document.getElementById('tappy-word-card-style-ocr')) {
             const style = document.createElement('style');
@@ -5287,9 +5268,6 @@ function showWordInfo(event, wordElement) {
         }
     }
     
-    // 每次显示前都重新确认卡片挂在当前正确的父节点下（body 或全屏元素）
-    ensureWordCardParent();
-
     // 查询词典
     const key = text.toLowerCase();
     const id = ++wordCardRequestId;
@@ -5503,9 +5481,6 @@ nextBtn.addEventListener('click', function() {
     function setReaderFullscreen(isFullscreen) {
         if (!stageWrap) return;
         document.body.classList.toggle('reader-fullscreen', isFullscreen);
-        // 如果切换全屏的瞬间单词卡片正好是可见的，也立刻把它挪到正确的父节点下，
-        // 避免它因为挂在旧的父节点（全屏 Top Layer 之外）而突然"消失"。
-        ensureWordCardParent();
         requestAnimationFrame(() => renderSpread(false));
     }
 

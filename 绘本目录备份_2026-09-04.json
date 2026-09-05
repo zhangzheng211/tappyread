@@ -1,6 +1,6 @@
 {
   "version": "3.0",
-  "timestamp": "2026-09-04T03:18:08.507Z",
+  "timestamp": "2026-09-04T12:52:37.634Z",
   "imgDir": "https://tappyreadjpeg-1325106148.cos.ap-guangzhou.myqcloud.com/jpeg/",
   "htmlDir": "https://tappyreadjpeg-1325106148.cos.ap-guangzhou.myqcloud.com/html/",
   "tree": [
@@ -16245,9 +16245,161 @@
       "name": "美国人初级短语",
       "sortKey": 3,
       "type": "folder"
+    },
+    {
+      "id": "n1788508759152-3spq",
+      "type": "folder",
+      "name": "字母阅读",
+      "children": [
+        {
+          "id": "n1788508827233-tpvd",
+          "type": "story",
+          "title": "字母阅读练习",
+          "builtin": false,
+          "pages": [
+            {
+              "file": "字母阅读练习 1.jpg",
+              "text": "Hello Carrie",
+              "cosKey": "jpeg/u407107_1788508874271_字母阅读练习_1.jpg"
+            },
+            {
+              "file": "字母阅读练习 2.jpg",
+              "text": "A is for apple\nA is for arrow\nA is for ant\nA is for animal\nA is for ax\nA is for alligator\nA is for ambulance",
+              "cosKey": "jpeg/u407107_1788508875649_字母阅读练习_2.jpg"
+            },
+            {
+              "file": "字母阅读练习 3.jpg",
+              "text": "B is for balloon\nB is for bear\nB is for bed\nB is for bee\nB is for bike\nB is for box\nB is for bat",
+              "cosKey": "jpeg/u407107_1788508876158_字母阅读练习_3.jpg"
+            },
+            {
+              "file": "字母阅读练习 4.jpg",
+              "text": "C is for cat\nC is for car\nC is for cookie\nC is for cake\nC is for carrot\nC is for cup\nC is for card",
+              "cosKey": "jpeg/u407107_1788508876707_字母阅读练习_4.jpg"
+            },
+            {
+              "file": "字母阅读练习 5.jpg",
+              "text": "D is for duck\nD is for doctor\nD is for door\nD is for dog\nD is for dinosaur\nD is for dolphin\nD is for dice",
+              "cosKey": "jpeg/u407107_1788508877224_字母阅读练习_5.jpg"
+            },
+            {
+              "file": "字母阅读练习 6.jpg",
+              "text": "E is for elephant\nE is for eggs\nE is for elbow\nE is for exit\nE is for eggplant\nE is for escalator\nE is for energy",
+              "cosKey": "jpeg/u407107_1788508877748_字母阅读练习_6.jpg"
+            },
+            {
+              "file": "字母阅读练习 7.jpg",
+              "text": "F is for fire\nF is for fish\nF is for foot\nF is for father\nF is for fruit\nF is for fan\nF is for flower",
+              "cosKey": "jpeg/u407107_1788508878306_字母阅读练习_7.jpg"
+            },
+            {
+              "file": "字母阅读练习 8.jpg",
+              "text": "G is for glasses\nG is for girl\nG is for goat\nG is for gate\nG is for grapes\nG is for goose\nG is for gorilla",
+              "cosKey": "jpeg/u407107_1788508878785_字母阅读练习_8.jpg"
+            },
+            {
+              "file": "字母阅读练习 9.jpg",
+              "text": "H is for horse\nH is for honey\nH is for ham\nH is for house\nH is for hat\nH is for helicopter\nH is for hair",
+              "cosKey": "jpeg/u407107_1788508879304_字母阅读练习_9.jpg"
+            },
+            {
+              "file": "字母阅读练习 10.jpg",
+              "text": "I is for igloo\nI is for ink\nI is for internet\nI is for iguana\nI is for insects\nI is for invitation\nI is for indian",
+              "cosKey": "jpeg/u407107_1788508879837_字母阅读练习_10.jpg"
+            },
+            {
+              "file": "字母阅读练习 11.jpg",
+              "text": "J is for jaguar\nJ is for jam\nJ is for jacket\nJ is for jelly beans\nJ is for juice\nJ is for jet\nJ is for jump",
+              "cosKey": "jpeg/u407107_1788508880380_字母阅读练习_11.jpg"
+            },
+            {
+              "file": "字母阅读练习 12.jpg",
+              "text": "K is for kite\nK is for key\nK is for kittens\nK is for kangaroo\nK is for ketchup\nK is for koala\nK is for king",
+              "cosKey": "jpeg/u407107_1788508880900_字母阅读练习_12.jpg"
+            },
+            {
+              "file": "字母阅读练习 13.jpg",
+              "text": "L is for lion\nL is for ladybugs\nL is for leg\nL is for lizard\nL is for lemons\nL is for lamp\nL is for lock",
+              "cosKey": "jpeg/u407107_1788508881615_字母阅读练习_13.jpg"
+            },
+            {
+              "file": "字母阅读练习 14.jpg",
+              "text": "M is for mouse\nM is for milk\nM is for monkeys\nM is for mittens\nM is for mail\nM is for moon\nM is for money",
+              "cosKey": "jpeg/u407107_1788508882136_字母阅读练习_14.jpg"
+            },
+            {
+              "file": "字母阅读练习 15.jpg",
+              "text": "N is for net\nN is for newspaper\nN is for nail\nN is for note\nN is for noodle\nN is for nest\nN is for nine",
+              "cosKey": "jpeg/u407107_1788508882620_字母阅读练习_15.jpg"
+            },
+            {
+              "file": "字母阅读练习 16.jpg",
+              "text": "O is for octopus\nO is for ostrich\nO is for octagon\nO is for otter\nO is for ox\nO is for olive\nO is for oxygen",
+              "cosKey": "jpeg/u407107_1788508883104_字母阅读练习_16.jpg"
+            },
+            {
+              "file": "字母阅读练习 17.jpg",
+              "text": "P is for pen\nP is for pizza\nP is for pea\nP is for pie\nP is for pony\nP is for pig\nP is for pineapple",
+              "cosKey": "jpeg/u407107_1788508883596_字母阅读练习_17.jpg"
+            },
+            {
+              "file": "字母阅读练习 18.jpg",
+              "text": "Q is for queen\nQ is for question mark\nQ is for quilt\nQ is for quarrel\nQ is for quick\nQ is for quiz\nQ is for quiet",
+              "cosKey": "jpeg/u407107_1788508884108_字母阅读练习_18.jpg"
+            },
+            {
+              "file": "字母阅读练习 19.jpg",
+              "text": "R is for ring\nR is for rocket\nR is for rain\nR is for robot\nR is for rainbow\nR is for rabbit\nR is for rose",
+              "cosKey": "jpeg/u407107_1788508884598_字母阅读练习_19.jpg"
+            },
+            {
+              "file": "字母阅读练习 20.jpg",
+              "text": "S is for snail\nS is for ski\nS is for snowman\nS is for snake\nS is for skirt\nS is for scissors\nS is for star",
+              "cosKey": "jpeg/u407107_1788508885105_字母阅读练习_20.jpg"
+            },
+            {
+              "file": "字母阅读练习 21.jpg",
+              "text": "T is for toy\nT is for tire\nT is for tiger\nT is for truck\nT is for train\nT is for telephone\nT is for top",
+              "cosKey": "jpeg/u407107_1788508885593_字母阅读练习_21.jpg"
+            },
+            {
+              "file": "字母阅读练习 22.jpg",
+              "text": "U is for umbrella\nU is for up\n\nU is for umpire\nU is for uncle\nU is for unhappy\nU is for upset",
+              "cosKey": "jpeg/u407107_1788508886129_字母阅读练习_22.jpg"
+            },
+            {
+              "file": "字母阅读练习 23.jpg",
+              "text": "V is for vacuum\nV is for volcano\nV is for vest\nV is for vegetables\nV is for van\nV is for vase\nV is for violin",
+              "cosKey": "jpeg/u407107_1788508886653_字母阅读练习_23.jpg"
+            },
+            {
+              "file": "字母阅读练习 24.jpg",
+              "text": "W is for watch\nW is for watermelon\nW is for wolf\nW is for wagon\nW is for window\nW is for wind\nW is for wave",
+              "cosKey": "jpeg/u407107_1788508888332_字母阅读练习_24.jpg"
+            },
+            {
+              "file": "字母阅读练习 25.jpg",
+              "text": "X is for x-ray\nX is for T-rex\nX is for box\nX is for fox\nX is for taxi\nX is for ox",
+              "cosKey": "jpeg/u407107_1788508888819_字母阅读练习_25.jpg"
+            },
+            {
+              "file": "字母阅读练习 26.jpg",
+              "text": "Y is for yoyo\nY is for yarn\nY is for yellow\nY is for yogurt\nY is for yell. \nY is for yacht",
+              "cosKey": "jpeg/u407107_1788508889473_字母阅读练习_26.jpg"
+            },
+            {
+              "file": "字母阅读练习 27.jpg",
+              "text": "Z is for zoo\nZ is for zebra\nZ is for zero\nZ is for zookeeper\nZ is for zone\nZ is for zigzag\nZ is for zipper",
+              "cosKey": "jpeg/u407107_1788508890008_字母阅读练习_27.jpg"
+            }
+          ],
+          "sortKey": 1
+        }
+      ],
+      "sortKey": null
     }
   ],
-  "selectedFolderId": "n1787234181459-cbkz",
+  "selectedFolderId": "n1788508759152-3spq",
   "collapsed": [
     "n1787234224413-2nqj",
     "n1787234225886-8auo",
@@ -16416,11 +16568,11 @@
     "n1787297476196-x1be",
     "n1787294569340-5d36",
     "n1787878119642-scn8",
+    "n1787297502180-0jjq",
     "n1787234192039-ziar",
     "n1787877971541-thjq",
-    "n1787902849443-ps1d",
-    "n1787297502180-0jjq",
-    "n1787234181459-cbkz"
+    "n1787234181459-cbkz",
+    "n1787902849443-ps1d"
   ],
   "whitelist": [
     "blue",
@@ -17635,7 +17787,7 @@
     "shops",
     "dogs"
   ],
-  "currentStoryId": null,
+  "currentStoryId": "n1788508827233-tpvd",
   "currentSpread": 0,
   "imageData": {}
 }
