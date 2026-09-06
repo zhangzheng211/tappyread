@@ -560,6 +560,74 @@
             max-width:100%; max-height:100%; object-fit:contain;
             border-radius:10px;
         }
+        /* ============ 抓取文字功能（独立于点读机 OCR，参考 Snagit 交互） ============ */
+        .grab-select-btn{
+            flex:none; position:absolute; left:60px;
+            background:var(--cream); border:2px solid var(--tent-navy); border-radius:999px;
+            padding:5px 14px; font-size:12px; font-weight:700; color:var(--tent-navy);
+            cursor:pointer; box-shadow:0 3px 0 rgba(38,41,107,0.18);
+            display:flex; align-items:center; gap:4px; white-space:nowrap;
+            font-family:'Baloo 2',sans-serif;
+            transition: background .15s ease, color .15s ease, transform .1s ease;
+        }
+        .grab-select-btn:active{ transform:translateY(2px); }
+        .grab-select-btn.active{
+            background:var(--clay); color:#fff; border-color:#b8402a;
+            animation: grabPulse 1s ease-in-out infinite;
+        }
+        @keyframes grabPulse{ 0%,100%{ box-shadow:0 3px 0 rgba(38,41,107,0.18); } 50%{ box-shadow:0 3px 0 rgba(38,41,107,0.18), 0 0 0 6px rgba(232,98,60,0.25); } }
+        .page-img-box.grab-select-mode{ cursor:crosshair; }
+        .page-img-box.grab-select-mode img{ pointer-events:none; }
+        .grab-select-rect{
+            position:absolute; border:2px dashed var(--tent-blue);
+            background:rgba(90,180,224,0.18); border-radius:4px;
+            pointer-events:none; z-index:25; box-sizing:border-box;
+        }
+        .grab-loading-badge{
+            position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+            background:rgba(38,41,107,0.88); color:#fff; padding:10px 18px; border-radius:999px;
+            font-weight:700; font-size:13px; z-index:30; display:flex; align-items:center; gap:8px;
+            font-family:'Baloo 2',sans-serif; white-space:nowrap;
+        }
+        .grab-loading-badge .spin{
+            width:14px; height:14px; border-radius:50%;
+            border:2px solid rgba(255,255,255,0.4); border-top-color:#fff;
+            animation: grabSpin .7s linear infinite;
+        }
+        @keyframes grabSpin{ to{ transform:rotate(360deg); } }
+        .grab-context-menu{
+            position:fixed; z-index:100000;
+            background:var(--cream); border:3px solid var(--tent-navy); border-radius:16px;
+            box-shadow:0 6px 0 rgba(38,41,107,0.22), 0 12px 24px rgba(0,0,0,0.28);
+            padding:6px; min-width:170px;
+            font-family:'Baloo 2',sans-serif;
+            animation: grabMenuPop .12s ease-out;
+        }
+        @keyframes grabMenuPop{ from{ transform:scale(0.9); opacity:0; } to{ transform:scale(1); opacity:1; } }
+        .grab-context-menu .gcm-item{
+            padding:10px 14px; border-radius:10px; cursor:pointer;
+            font-weight:700; font-size:14px; color:var(--tent-navy);
+            display:flex; align-items:center; gap:8px; white-space:nowrap;
+        }
+        .grab-context-menu .gcm-item:hover{ background:rgba(90,180,224,0.28); }
+        #grabTextResult{
+            width:100%; box-sizing:border-box; resize:vertical;
+            font-family:'Baloo 2',sans-serif; font-size:14px; line-height:1.5;
+            padding:12px; border-radius:14px; border:3px solid rgba(38,41,107,0.28);
+            background:#fff; color:var(--ink); min-height:160px;
+        }
+        #grabTextResult:focus{ outline:none; border-color:var(--tent-blue); }
+        /* 抓取文字结果弹框支持拖动：只对这一个弹框生效，不影响其它弹窗 */
+        #grabTextOverlay .modal-box{ cursor:default; }
+        #grabTextOverlay .modal-header{ cursor:move; user-select:none; }
+        .grab-copied-toast{
+            position:fixed; left:50%; bottom:36px; transform:translateX(-50%);
+            background:var(--tent-navy); color:#fff; padding:8px 18px; border-radius:999px;
+            font-family:'Baloo 2',sans-serif; font-weight:700; font-size:13px;
+            z-index:100001; box-shadow:0 4px 0 rgba(0,0,0,0.2);
+            animation: grabToastPop .18s ease-out;
+        }
+        @keyframes grabToastPop{ from{ transform:translateX(-50%) translateY(10px); opacity:0; } to{ transform:translateX(-50%) translateY(0); opacity:1; } }
         body.reader-fullscreen .topbar,
         body.reader-fullscreen .sidebar,
         body.reader-fullscreen .story-caption,
@@ -978,6 +1046,13 @@
         .batch-story-item .b-status.importing{ background:rgba(90,180,224,0.25); color:var(--tent-blue); animation: pulse-status 0.8s ease-in-out infinite; }
         @keyframes pulse-status{ 0%,100%{opacity:1;} 50%{opacity:0.5;} }
 
+        /* PDF批量生成：待选 PDF 列表里的删除按钮（复用 .batch-story-item 的行样式） */
+        .batch-story-item .pdf-remove-btn{
+            flex:none; background:none; border:none; font-size:16px; cursor:pointer;
+            color:#b8402a; padding:2px 6px; line-height:1;
+        }
+        .batch-story-item .pdf-size{ font-size:12px; color:#6b5a3f; flex:none; }
+
         .progress-modal .modal-box{ max-width:600px; }
         .progress-bar-wrap{
             background:rgba(38,41,107,0.12); border-radius:999px; height:24px; overflow:hidden;
@@ -1033,6 +1108,12 @@
             .fullscreen-hint{
                 position:static;
                 white-space:normal;
+            }
+            .grab-select-btn{
+                position:static;
+                order:-1;
+                white-space:normal;
+                text-align:center;
             }
             .story-meta-center{ order:-1; }
             .sidebar{ position:fixed; left:14px; top:14px; bottom:14px; z-index:150;
@@ -1160,7 +1241,7 @@ body.reader-fullscreen .stage-wrap {
                 <button class="action-btn action-btn-blue" id="newStoryBtn">📖 新增绘本</button>
                 <button class="add-page-btn" id="openAddModalBtn">➕ 添加图片绘本</button>
                 <button class="action-btn action-btn-html" id="htmlGenerateBtn" style="display:none;">⚡ 添加HTML绘本</button>  <!-- ⬅️ 添加 style="display:none;"，如果要显示出来则修改style="display:inline-flex;" -->
-                <button class="action-btn action-btn-primary" id="batchImportBtn">📦 图片批量生成</button>
+                <button class="action-btn action-btn-primary" id="batchImportBtn">📦 PDF批量生成</button>
                 <button class="action-btn action-btn-orange" id="dirSettingBtn" style="display:none;">📁 目录配置</button>  <!-- ⬅️ 添加 style="display:none;"，如果要显示出来则修改style="display:inline-flex;" -->
                 <div class="voice-pill" title="朗读设置">
                     <span class="voice-icon">🎙️</span>
@@ -1174,6 +1255,7 @@ body.reader-fullscreen .stage-wrap {
 
         <div class="stage-wrap">
             <div class="reader-meta-row">
+                <div class="grab-select-btn" id="grabSelectBtn" title="点击后在绘本图片上拖拽出一个方框，松开鼠标即可识别方框内的文字">✂️ 框选抓取文字</div>
                 <div class="story-meta-center">
                     <div class="story-caption" id="storyCaption"></div>
                     <div class="spread-tag" id="spreadTag">1–2 / 5</div>
@@ -1193,6 +1275,28 @@ body.reader-fullscreen .stage-wrap {
 <div class="preview-overlay" id="previewOverlay">
     <img id="previewImage" src="" alt="预览">
     <div class="close-hint">点击任意位置关闭预览</div>
+</div>
+
+<!-- ============ Modal: 抓取文字结果（独立于点读机OCR，参考 Snagit） ============ -->
+<div class="modal-overlay" id="grabTextOverlay">
+    <div class="modal-box narrow" style="max-width:560px;">
+        <div class="modal-header">
+            <h3>🔍 抓取文字结果</h3>
+            <button class="modal-close" id="closeGrabTextBtn">✕</button>
+        </div>
+        <div class="modal-body">
+            <div class="field">
+                <label>识别到的文字（可直接编辑修正）</label>
+                <textarea id="grabTextResult" rows="8" placeholder="未识别到文字"></textarea>
+            </div>
+            <div class="hint-text">💡 识别效果与选取区域的清晰度、字体大小有关；如有个别文字不准确，可直接在上方修改后再使用。</div>
+        </div>
+        <div class="modal-actions">
+            <button class="btn" id="copyGrabTextBtn">📋 复制</button>
+            <button class="btn primary" id="useGrabTextBtn">📝 设为本页朗读文字</button>
+            <button class="btn" id="closeGrabTextBtn2">关闭</button>
+        </div>
+    </div>
 </div>
 
 <!-- ============ Modal: Add pages ============ -->
@@ -1274,6 +1378,60 @@ body.reader-fullscreen .stage-wrap {
             </div>
             <div class="modal-actions" id="batchProgressActions">
                 <button class="btn danger" id="cancelBatchBtn">取消导入</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============ Modal: PDF批量生成（选择PDF → 转图片 → 上传服务器 → 生成绘本） ============ -->
+<div class="modal-overlay progress-modal" id="pdfBatchOverlay">
+    <div class="modal-box" id="pdfBatchBox">
+        <div class="modal-header" id="pdfBatchHeader">
+            <h3 id="pdfBatchTitle">📄 PDF批量生成 - 选择PDF文件</h3>
+            <button class="modal-close" id="closePdfBatchBtn">✕</button>
+        </div>
+        <div class="modal-body">
+            <!-- 阶段一：选择 PDF -->
+            <div id="pdfBatchSelectStage">
+                <div class="field">
+                    <label>1. 选择一个或多个PDF文件（每个PDF会自动生成一本对应的绘本）</label>
+                    <div class="dropzone" id="pdfDropzone">
+                        <div class="icon">📄</div>
+                        <div>点击选择PDF，或把多个PDF文件一起拖到这里</div>
+                        <small>每一页会被转换为高清JPG图片，自动上传到服务器后再自动识别文字生成绘本</small>
+                        <input type="file" id="pdfFileInput" accept=".pdf,application/pdf" multiple style="display:none">
+                    </div>
+                    <div class="hint-text">已选择 <span id="pdfFileCount">0</span> 个PDF文件</div>
+                </div>
+                <div class="field" id="pdfFileListWrap" style="display:none;">
+                    <label>待处理的PDF文件</label>
+                    <div class="batch-story-list" id="pdfFileList"></div>
+                </div>
+                <div class="modal-actions">
+                    <button class="btn primary" id="startPdfBatchBtn" disabled>🚀 开始转换并生成绘本</button>
+                    <button class="btn" id="clearPdfBatchBtn">清空列表</button>
+                </div>
+            </div>
+            <!-- 阶段二：转换 + 上传 + 生成 进度 -->
+            <div id="pdfBatchProgressStage" style="display:none;">
+                <div class="field">
+                    <label id="pdfBatchStageLabel">正在转换 PDF 并上传图片...</label>
+                    <div class="progress-bar-wrap">
+                        <div class="progress-bar-fill" id="pdfProgressFill" style="width:0%"></div>
+                    </div>
+                </div>
+                <div class="progress-stats">
+                    <div>PDF文件<br><span id="pdfTotalFiles">0</span></div>
+                    <div>总图片<br><span id="pdfTotalImages">0</span></div>
+                    <div>已处理<br><span id="pdfProcessedCount">0</span></div>
+                </div>
+                <div class="field">
+                    <label>处理日志</label>
+                    <div class="progress-log" id="pdfProgressLog"></div>
+                </div>
+                <div class="modal-actions" id="pdfBatchProgressActions">
+                    <button class="btn danger" id="cancelPdfBatchBtn">取消</button>
+                </div>
             </div>
         </div>
     </div>
@@ -1436,19 +1594,36 @@ body.reader-fullscreen .stage-wrap {
                     点击绘本目录左上角的 <span class="btn-demo green">📥 导入</span> 按钮，选择随工具提供的 <code>绘本目录备份_xxxx-xx-xx.json</code> 备份文件，导入成功后即可开始阅读初始化的绘本内容了！
                 </div>
 
-                <!-- ===== PDF转图片工具（放在创建自己的绘本之前） ===== -->
-                <h2>📄 PDF转图片工具</h2>
+                <!-- ===== PDF转图片工具（独立小工具，未做任何改动） ===== -->
+                <h2>📄 PDF转图片工具（独立小工具）</h2>
                 <div class="step" style="border-left-color:#1ABC9C;">
-                    点击顶部工具栏的 <span class="btn-demo teal">📄 PDF转图片</span> 按钮，打开独立的PDF转图片工具页面。<br>
+                    点击顶部工具栏的 <span class="btn-demo teal">📄 PDF转图片</span> 按钮，会在新标签页打开一个独立的PDF转图片小工具。<br>
                     <strong>功能说明</strong>：
                     <ul style="margin:4px 0; padding-left:18px;">
                         <li>支持拖拽或选择多个PDF文件</li>
                         <li>将PDF每一页转换为高质量JPG图片</li>
-                        <li>自动打包成ZIP文件下载</li>
+                        <li>自动打包成ZIP文件下载到本地</li>
                         <li>完全在浏览器本地运行，文件不上传服务器</li>
                     </ul>
-                    <div class="tip">使用场景：如果您有PDF格式的绘本电子书，可以先用此工具将每一页转换为JPG图片，然后使用「批量导入绘本」功能快速创建绘本。</div>
+                    <div class="tip">这是一个纯本地小工具：如果您只是想把PDF转成图片留着自己用（不需要立即生成绘本），用这个工具最方便。如果您的目的是"把PDF直接做成绘本"，不需要单独用这个工具——请直接使用下面介绍的 <span class="btn-demo yellow">📦 PDF批量生成</span>，一步到位。</div>
                 </div>
+
+                <!-- ===== PDF批量生成（推荐：一步把PDF做成绘本） ===== -->
+                <h2>📦 PDF批量生成（推荐：PDF一键变绘本）</h2>
+                <div class="step" style="border-left-color:#FFD93D;">
+                    点击顶部工具栏的 <span class="btn-demo yellow">📦 PDF批量生成</span>，选择一个或多个PDF文件，系统会自动完成"转图片 → 上传服务器 → 识别文字 → 生成绘本"全部流程，<strong>每个PDF自动生成一本对应的绘本</strong>，无需再手动操作图片。<br>
+                    <strong>完整流程</strong>：
+                    <ol style="margin:4px 0; padding-left:18px;">
+                        <li>点击 <span class="btn-demo yellow">📦 PDF批量生成</span>，弹窗中选择/拖拽一个或多个PDF文件</li>
+                        <li>点击「🚀 开始转换并生成绘本」，系统按PDF页面顺序把每一页转换为高清JPG图片</li>
+                        <li>每张图片转换完成后，会立即以图片的形式上传到服务器目录（腾讯云COS的 <code>jpeg/</code> 目录），全程可在弹窗里看到实时进度和日志</li>
+                        <li>这一批图片全部上传完成后，系统自动按PDF文件名分组识别每页文字（与「PDF批量生成」原有识别逻辑完全一致），弹出预览列表</li>
+                        <li>确认无误后点击「✅ 确认导入」，即可批量生成对应的绘本</li>
+                    </ol>
+                    <div class="tip">绘本命名规则：与「PDF转图片」工具保持一致——会自动去掉文件名开头的数字前缀（如 <code>01-</code>）、把下划线换成空格，剩下的部分就是绘本名称；PDF内的页面顺序即为绘本的页面顺序。</div>
+                    <div class="warning">图片需要联网上传到服务器，请确保网络畅通；上传过程中请不要关闭弹窗，否则可能中断处理。</div>
+                </div>
+
 
                 <h2>✨ 创建自己的绘本</h2>
 
@@ -1458,11 +1633,11 @@ body.reader-fullscreen .stage-wrap {
                     <div class="table-wrap">
                         <table>
                             <tr><th>方式</th><th>操作</th><th>适用场景</th></tr>
-                            <tr><td><span class="btn-demo blue">📖 新增绘本</span></td><td>点击 <span class="btn-demo blue">📖 新增绘本</span>，输入名称即可创建</td><td>手动创建单个绘本</td></tr>
-                            <tr><td><span class="btn-demo yellow">📦 批量导入绘本</span></td><td>点击 <span class="btn-demo yellow">📦 批量导入绘本</span>，选择多张图片自动识别分组</td><td>从图片文件批量创建多个绘本</td></tr>
+                            <tr><td><span class="btn-demo blue">📖 新增绘本</span></td><td>点击 <span class="btn-demo blue">📖 新增绘本</span>，输入名称即可创建</td><td>手动创建单个空白绘本，自己添加图片</td></tr>
+                            <tr><td><span class="btn-demo yellow">📦 PDF批量生成</span></td><td>点击 <span class="btn-demo yellow">📦 PDF批量生成</span>，选择一个或多个PDF文件</td><td>已有PDF格式的绘本电子书，一次批量生成多本绘本</td></tr>
                         </table>
                     </div>
-                    <div class="tip">批量导入小技巧：将图片按 <code>01-绘本名-01.jpg</code>、<code>01-绘本名-02.jpg</code> 或 <code>绘本名 1.jpg</code> 等格式命名，系统会自动按绘本名称分组，一次导入多个绘本。</div>
+                    <div class="tip">批量生成小技巧：PDF文件名建议按 <code>01-绘本名.pdf</code>、<code>02-绘本名.pdf</code> 这样带数字前缀的方式命名，系统会按数字自动排序；不带数字前缀也可以，此时按文件名排序。</div>
                 </div>
 
                 <div class="step">
@@ -1502,27 +1677,28 @@ body.reader-fullscreen .stage-wrap {
                     </table>
                 </div>
 
-                <h3 style="font-family:'Baloo 2',sans-serif; font-size:16px; color:var(--tent-navy); margin:8px 0 4px 0;">3. 批量导入绘本</h3>
+                <h3 style="font-family:'Baloo 2',sans-serif; font-size:16px; color:var(--tent-navy); margin:8px 0 4px 0;">3. PDF批量生成</h3>
                 <div class="step">
-                    <strong>使用场景</strong>：您有一批按一定规则命名的图片文件，希望快速生成多个绘本。<br>
-                    <strong>文件名格式要求</strong>：
+                    <strong>使用场景</strong>：您手上有一批PDF格式的绘本电子书，希望一次性快速生成多本绘本，不想再手动逐张处理图片。<br>
+                    <strong>PDF文件命名建议</strong>：
                     <pre style="background:rgba(38,41,107,0.04); padding:6px 12px; border-radius:8px; font-size:12px; margin:4px 0;">
-01-Kipper's Diary-01.jpg     → 绘本"Kipper's Diary"的第1页
-01-Kipper's Diary-02.jpg     → 绘本"Kipper's Diary"的第2页
-02-Spaceman-01.jpg           → 绘本"Spaceman"的第1页</pre>
-                    <strong>支持的命名模式</strong>：
+01-Kipper's Diary.pdf     → 生成绘本"Kipper's Diary"
+02-Spaceman.pdf           → 生成绘本"Spaceman"
+Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀也可以）</pre>
+                    <strong>处理规则</strong>：
                     <ul style="margin:4px 0; padding-left:18px;">
-                        <li><code>数字-绘本名-页码.jpg</code></li>
-                        <li><code>绘本名 页码.jpg</code></li>
-                        <li><code>数字 绘本名 页码.jpg</code></li>
+                        <li>每个PDF自动生成一本对应的绘本，绘本名取自PDF文件名（自动去掉开头的数字前缀、下划线转空格）</li>
+                        <li>PDF内每一页按原有顺序转换为一张图片，即绘本的一页</li>
+                        <li>转换出的图片会自动上传到服务器（腾讯云COS），不再像「PDF转图片」那样只生成本地ZIP</li>
                     </ul>
                     <strong>操作步骤</strong>：
                     <ol style="margin:4px 0; padding-left:18px;">
-                        <li>点击 <span class="btn-demo yellow">📦 批量导入绘本</span></li>
-                        <li>选择所有图片文件（支持多选）</li>
-                        <li>系统自动分析并按绘本名称分组</li>
+                        <li>点击 <span class="btn-demo yellow">📦 PDF批量生成</span></li>
+                        <li>选择或拖拽一个或多个PDF文件，点击「🚀 开始转换并生成绘本」</li>
+                        <li>等待系统逐页转换、逐张上传（可在弹窗中查看实时进度和日志）</li>
+                        <li>全部图片上传完成后，系统自动分析并按PDF文件名分组，弹出预览</li>
                         <li>预览确认每个绘本的页面和名称</li>
-                        <li>点击「✅ 确认导入」，系统自动识别每页文字并导入</li>
+                        <li>点击「✅ 确认导入」，系统自动识别每页文字并生成绘本</li>
                     </ol>
                 </div>
 
@@ -1598,6 +1774,7 @@ body.reader-fullscreen .stage-wrap {
                 <div class="faq-item"><strong>Q3: 备份文件导入后图片不显示？</strong><br>导入备份后，检查 <span class="btn-demo orange">📁 图片目录</span> 是否与备份时的路径一致。如有变化，重新设置图片目录即可。</div>
                 <div class="faq-item"><strong>Q4: 批量导入时识别到乱码？</strong><br>系统已内置智能乱码过滤，如果仍有乱码，请检查图片底部文字是否清晰，或手动编辑修正。</div>
                 <div class="faq-item"><strong>Q5: 支持哪些图片格式？</strong><br>支持常见格式：JPG、PNG、BMP、WebP等。</div>
+                <div class="faq-item"><strong>Q6: PDF批量生成时提示图片上传失败？</strong><br>请检查网络连接是否正常；图片会优先尝试直传腾讯云COS，失败时自动降级走后端中转。个别图片上传失败不影响整体流程，仍会继续转换、识别并生成绘本，可稍后在绘本目录里手动检查对应页面是否需要重新添加图片。</div>
 
                 <!-- ===== 移动端适配 ===== -->
                 <h2>📱 移动端适配</h2>
@@ -1653,6 +1830,9 @@ body.reader-fullscreen .stage-wrap {
 <!-- 前端直传腾讯云 COS 所需的浏览器 SDK（本地 vendor，不依赖外部 CDN 可用性） -->
 <script src="vendor/cos-js-sdk-v5.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<!-- PDF批量生成功能所需：PDF.js，用于在浏览器本地把 PDF 每一页转成图片
+     （与「PDF转图片」独立工具使用的是同一个库/同一套转换逻辑，互不影响） -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
 <script>
     /* =====================================================================
        ===== 数据持久化核心 =====
@@ -4253,6 +4433,8 @@ body.reader-fullscreen .stage-wrap {
         img.referrerPolicy = 'no-referrer';
         //允许跨域读取图片
         img.crossOrigin = 'anonymous';  // ← 添加这一行
+        // 避免浏览器原生的"拖拽图片"手势干扰"框选抓取文字"的鼠标拖拽选区
+        img.draggable = false;
         // 使用优化后的 pageSrc 函数加载图片
         const imgSrc = pageSrc(page);
         if (imgSrc) {
@@ -4303,10 +4485,13 @@ body.reader-fullscreen .stage-wrap {
 
         speaker.addEventListener('click', ()=> speakOne(page.text || 'This page has no words.', speaker));
         imgBox.addEventListener('click', (e)=>{
+            // 处于"框选抓取文字"模式时，点击/拖拽是在选区，不应该触发朗读
+            if (grabSelectModeActive) return;
             spawnRipple(e, imgBox);
             speakOne(page.text || 'This page has no words.', speaker);
         });
         imgBox.addEventListener('dblclick', (e)=>{
+            if (grabSelectModeActive) return;
             e.preventDefault();
             toggleReaderFullscreen();
         });
@@ -4317,6 +4502,17 @@ body.reader-fullscreen .stage-wrap {
         editBtn.title = '编辑本页朗读文字';
         editBtn.addEventListener('click', ()=> startEditPageText(page, captionBar, captionText, editBtn));
         captionBar.appendChild(editBtn);
+
+        // ============ 抓取文字：方式一（右键菜单，整张图片） + 方式二（手动框选） ============
+        const grabTextCtx = { page, captionText, editBtn };
+        imgBox.addEventListener('contextmenu', (e)=>{
+            if (!img.src || img.style.display === 'none') return;
+            e.preventDefault();
+            showGrabContextMenu(e.clientX, e.clientY, () => {
+                runGrabTextWholeImage(imgBox, img, grabTextCtx);
+            });
+        });
+        wireGrabSelectDrag(imgBox, img, grabTextCtx);
 
         panel.appendChild(imgBox);
         panel.appendChild(captionBar);
@@ -4454,6 +4650,384 @@ body.reader-fullscreen .stage-wrap {
         container.appendChild(r);
         setTimeout(()=> r.remove(), 650);
     }
+
+    // ============================================================
+    // 🆕 抓取文字功能（参考 Snagit「Grab Text」交互实现）
+    // ------------------------------------------------------------
+    // 重要说明：这套识别逻辑与点读机原有的 OCR 机制（getOcrWorkerInstance /
+    // getOcrWorker，用于识别绘本图片底部朗读文字条）完全独立——独立的 Tesseract
+    // Worker 实例、独立的参数配置（不限制字符白名单、专门针对"任意选区/整页文字"
+    // 优化，而不是"底部一行文字条"），互不干扰、互不复用，点读机原有识别功能
+    // 一行代码都没有改动。
+    //
+    // 操作范围：仅限绘本阅读区的绘本图片（HTML页面/iframe 不支持，因为没有可
+    // 供裁剪像素的图片元素）。
+    //   方式一：右键图片 → 弹出菜单「🔍 抓取文字...」→ 识别整张图片文字
+    //   方式二：点击「✂️ 框选抓取文字」进入框选模式 → 在图片上拖拽出一个方框 →
+    //          松开鼠标 → 识别方框内区域的文字
+    // ============================================================
+
+    let grabSelectModeActive = false;   // 是否处于"框选抓取文字"模式
+    let grabTextWorkerInstance = null;  // 独立的 Tesseract Worker（与点读机OCR不共用）
+    let grabDragState = null;           // 当前正在进行的框选拖拽状态
+
+    const grabSelectBtn = document.getElementById('grabSelectBtn');
+    const grabTextOverlay = document.getElementById('grabTextOverlay');
+    const grabTextModalBox = grabTextOverlay.querySelector('.modal-box');
+    const grabTextModalHeader = grabTextOverlay.querySelector('.modal-header');
+    const grabTextResultTa = document.getElementById('grabTextResult');
+    const closeGrabTextBtn = document.getElementById('closeGrabTextBtn');
+    const closeGrabTextBtn2 = document.getElementById('closeGrabTextBtn2');
+    const copyGrabTextBtn = document.getElementById('copyGrabTextBtn');
+    const useGrabTextBtn = document.getElementById('useGrabTextBtn');
+    let grabTextActiveCtx = null; // { page, captionText, editBtn } —— 记录当前结果弹窗对应的是哪一页
+
+    // ---- 独立的 Tesseract Worker：无字符白名单限制，按"一段/整块文字"分段 ----
+    async function getGrabTextWorker() {
+        if (grabTextWorkerInstance) return grabTextWorkerInstance;
+        if (typeof Tesseract === 'undefined' || !Tesseract.createWorker) {
+            console.warn('Tesseract.js 未加载，抓取文字功能不可用');
+            return null;
+        }
+        try {
+            grabTextWorkerInstance = await Tesseract.createWorker('eng');
+            await grabTextWorkerInstance.setParameters({
+                tessedit_pageseg_mode: '6',   // 假设是一块规整的文字（适合整页/选区），识别准确度更高
+                preserve_interword_spaces: '1'
+                // 注意：不设置 tessedit_char_whitelist —— 与点读机OCR不同，
+                // 这里要覆盖任意文字内容，不局限于底部朗读文字条的固定字符集
+            });
+        } catch (err) {
+            console.warn('抓取文字 Worker 创建失败:', err);
+            grabTextWorkerInstance = null;
+        }
+        return grabTextWorkerInstance;
+    }
+
+    // ---- 图片裁剪 + 预处理增强（放大 + 灰度 + 对比度拉伸），提升识别准确率 ----
+    function cropAndEnhanceForGrabText(img, natX, natY, natW, natH) {
+        const nw = img.naturalWidth, nh = img.naturalHeight;
+        natX = Math.max(0, Math.min(nw, natX));
+        natY = Math.max(0, Math.min(nh, natY));
+        natW = Math.max(1, Math.min(nw - natX, natW));
+        natH = Math.max(1, Math.min(nh - natY, natH));
+
+        // 参考专业抓字工具的经验：分辨率越高，识别准确率越高，尤其是绘本里
+        // 较小或带装饰性的字体。选区较小时自动放大到至少约1600px宽（最多放大4倍）。
+        const targetMinWidth = 1600;
+        let upscale = 1;
+        if (natW < targetMinWidth) {
+            upscale = Math.min(4, targetMinWidth / natW);
+        }
+        const outW = Math.max(1, Math.round(natW * upscale));
+        const outH = Math.max(1, Math.round(natH * upscale));
+
+        const canvas = document.createElement('canvas');
+        canvas.width = outW;
+        canvas.height = outH;
+        const ctx = canvas.getContext('2d');
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, natX, natY, natW, natH, 0, 0, outW, outH);
+
+        // 灰度化 + 线性对比度拉伸：去除色彩干扰、加强文字与背景的反差
+        const imageData = ctx.getImageData(0, 0, outW, outH);
+        const data = imageData.data;
+        let min = 255, max = 0;
+        const gray = new Uint8ClampedArray(outW * outH);
+        for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+            const g = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+            gray[p] = g;
+            if (g < min) min = g;
+            if (g > max) max = g;
+        }
+        const range = Math.max(1, max - min);
+        for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+            const stretched = ((gray[p] - min) / range) * 255;
+            data[i] = data[i + 1] = data[i + 2] = stretched;
+        }
+        ctx.putImageData(imageData, 0, 0);
+
+        return canvas.toDataURL('image/png');
+    }
+
+    async function recognizeGrabText(dataUrl) {
+        const worker = await getGrabTextWorker();
+        if (!worker) throw new Error('OCR引擎未就绪，请检查网络连接（Tesseract.js 未能加载）');
+        const { data } = await worker.recognize(dataUrl);
+        const raw = (data && data.text) ? data.text : '';
+        return raw
+            .replace(/\r\n/g, '\n')
+            .replace(/[ \t]+\n/g, '\n')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+    }
+
+    // ---- 屏幕坐标 → 图片自然像素坐标（自动适配 object-fit:contain 的实际渲染区域） ----
+    function grabPointToNatural(img, clientX, clientY) {
+        const rect = img.getBoundingClientRect();
+        if (!rect.width || !rect.height || !img.naturalWidth || !img.naturalHeight) return null;
+        const scaleX = img.naturalWidth / rect.width;
+        const scaleY = img.naturalHeight / rect.height;
+        let x = (clientX - rect.left) * scaleX;
+        let y = (clientY - rect.top) * scaleY;
+        x = Math.max(0, Math.min(img.naturalWidth, x));
+        y = Math.max(0, Math.min(img.naturalHeight, y));
+        return { x, y };
+    }
+
+    function showGrabLoading(imgBox) {
+        hideGrabLoading(imgBox);
+        const badge = document.createElement('div');
+        badge.className = 'grab-loading-badge';
+        badge.innerHTML = '<span class="spin"></span><span>正在识别文字...</span>';
+        imgBox.appendChild(badge);
+        return badge;
+    }
+    function hideGrabLoading(imgBox) {
+        const old = imgBox.querySelector('.grab-loading-badge');
+        if (old) old.remove();
+    }
+
+    async function runGrabTextOnRegion(imgBox, img, natX, natY, natW, natH, ctx) {
+        const badge = showGrabLoading(imgBox);
+        try {
+            const dataUrl = cropAndEnhanceForGrabText(img, natX, natY, natW, natH);
+            const text = await recognizeGrabText(dataUrl);
+            badge.remove();
+            openGrabTextResultModal(text, ctx);
+        } catch (err) {
+            badge.remove();
+            alert('抓取文字失败：' + (err && err.message ? err.message : '未知错误'));
+        }
+    }
+
+    function runGrabTextWholeImage(imgBox, img, ctx) {
+        if (!img.naturalWidth || !img.naturalHeight) {
+            alert('图片尚未加载完成，请稍候再试');
+            return;
+        }
+        runGrabTextOnRegion(imgBox, img, 0, 0, img.naturalWidth, img.naturalHeight, ctx);
+    }
+
+    function openGrabTextResultModal(text, ctx) {
+        grabTextActiveCtx = ctx || null;
+        grabTextResultTa.value = text || '';
+        grabTextModalBox.style.transform = ''; // 每次打开都从居中位置开始，不记忆上次拖动的位置
+        grabTextOverlay.classList.add('open');
+        setTimeout(() => grabTextResultTa.focus(), 30);
+    }
+    function closeGrabTextResultModal() {
+        grabTextOverlay.classList.remove('open');
+        grabTextActiveCtx = null;
+    }
+    closeGrabTextBtn.addEventListener('click', closeGrabTextResultModal);
+    closeGrabTextBtn2.addEventListener('click', closeGrabTextResultModal);
+    grabTextOverlay.addEventListener('click', (e) => { if (e.target === grabTextOverlay) closeGrabTextResultModal(); });
+
+    // ---- 抓取文字结果弹框支持拖动位置 ----
+    // 原理：弹框本身仍然是 .modal-overlay 用 flex 居中的普通子元素（不改变原有
+    // 居中布局逻辑），拖动时只是给 .modal-box 叠加一个 CSS transform:translate()
+    // 偏移量，松开鼠标后偏移量保留，直到下次重新打开弹框时才复位居中。
+    (function enableGrabTextModalDrag(){
+        let dragging = false;
+        let startX = 0, startY = 0, baseX = 0, baseY = 0;
+
+        function getCurrentTranslate(){
+            const style = window.getComputedStyle(grabTextModalBox);
+            const matrix = style.transform;
+            if (!matrix || matrix === 'none') return { x: 0, y: 0 };
+            const match = matrix.match(/matrix\(([^)]+)\)/);
+            if (!match) return { x: 0, y: 0 };
+            const parts = match[1].split(',').map(Number);
+            return { x: parts[4] || 0, y: parts[5] || 0 };
+        }
+
+        grabTextModalHeader.addEventListener('mousedown', (e) => {
+            if (e.target.closest('.modal-close')) return; // 点关闭按钮时不触发拖动
+            dragging = true;
+            startX = e.clientX;
+            startY = e.clientY;
+            const cur = getCurrentTranslate();
+            baseX = cur.x;
+            baseY = cur.y;
+            e.preventDefault();
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!dragging) return;
+            const dx = e.clientX - startX;
+            const dy = e.clientY - startY;
+            grabTextModalBox.style.transform = `translate(${baseX + dx}px, ${baseY + dy}px)`;
+        });
+
+        document.addEventListener('mouseup', () => {
+            dragging = false;
+        });
+    })();
+
+    copyGrabTextBtn.addEventListener('click', async () => {
+        const value = grabTextResultTa.value;
+        try {
+            await navigator.clipboard.writeText(value);
+        } catch (err) {
+            // 兼容不支持 Clipboard API 的环境：退回到传统的 selection + execCommand
+            grabTextResultTa.select();
+            try { document.execCommand('copy'); } catch (e2) { /* noop */ }
+        }
+        const toast = document.createElement('div');
+        toast.className = 'grab-copied-toast';
+        toast.textContent = '✅ 已复制到剪贴板';
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 1400);
+    });
+
+    useGrabTextBtn.addEventListener('click', () => {
+        if (!grabTextActiveCtx || !grabTextActiveCtx.page) {
+            closeGrabTextResultModal();
+            return;
+        }
+        const { page, captionText } = grabTextActiveCtx;
+        page.text = grabTextResultTa.value.trim();
+        fillCaption(captionText, page.text);
+        renderTree();
+        saveLibrary();
+        closeGrabTextResultModal();
+    });
+
+    // ---- 自定义右键菜单（方式一：整张图片抓取文字） ----
+    function showGrabContextMenu(clientX, clientY, onConfirm) {
+        const old = document.querySelector('.grab-context-menu');
+        if (old) old.remove();
+
+        const menu = document.createElement('div');
+        menu.className = 'grab-context-menu';
+        const item = document.createElement('div');
+        item.className = 'gcm-item';
+        item.textContent = '🔍 抓取文字...';
+        menu.appendChild(item);
+        document.body.appendChild(menu);
+
+        // 先加入DOM再定位，避免菜单超出视口
+        const menuRect = menu.getBoundingClientRect();
+        let left = clientX, top = clientY;
+        if (left + menuRect.width > window.innerWidth - 8) left = window.innerWidth - menuRect.width - 8;
+        if (top + menuRect.height > window.innerHeight - 8) top = window.innerHeight - menuRect.height - 8;
+        menu.style.left = Math.max(8, left) + 'px';
+        menu.style.top = Math.max(8, top) + 'px';
+
+        function cleanup() {
+            menu.remove();
+            document.removeEventListener('mousedown', onOutside, true);
+            document.removeEventListener('keydown', onKey, true);
+        }
+        function onOutside(e) {
+            if (!menu.contains(e.target)) cleanup();
+        }
+        function onKey(e) {
+            if (e.key === 'Escape') cleanup();
+        }
+        item.addEventListener('click', () => {
+            cleanup();
+            if (typeof onConfirm === 'function') onConfirm();
+        });
+        setTimeout(() => {
+            document.addEventListener('mousedown', onOutside, true);
+            document.addEventListener('keydown', onKey, true);
+        }, 0);
+    }
+
+    // ---- 手动框选（方式二） ----
+    function wireGrabSelectDrag(imgBox, img, ctx) {
+        imgBox.addEventListener('mousedown', (e) => {
+            if (!grabSelectModeActive) return;
+            if (!img.src || img.style.display === 'none' || !img.naturalWidth) return;
+            e.preventDefault();
+            e.stopPropagation();
+
+            const boxRect = imgBox.getBoundingClientRect();
+            const rectEl = document.createElement('div');
+            rectEl.className = 'grab-select-rect';
+            imgBox.appendChild(rectEl);
+
+            grabDragState = {
+                imgBox, img, ctx, boxRect,
+                startClientX: e.clientX, startClientY: e.clientY,
+                rectEl
+            };
+            updateGrabRect(e.clientX, e.clientY);
+        });
+
+        imgBox.addEventListener('mouseleave', () => {
+            // 鼠标移出该图片区域时不取消拖拽（允许在 imgBox 之外也能继续画到边界），
+            // 具体收尾统一在全局 mouseup 里处理
+        });
+    }
+
+    function updateGrabRect(clientX, clientY) {
+        if (!grabDragState) return;
+        const { boxRect, startClientX, startClientY, rectEl } = grabDragState;
+        const x1 = Math.max(boxRect.left, Math.min(boxRect.right, startClientX));
+        const y1 = Math.max(boxRect.top, Math.min(boxRect.bottom, startClientY));
+        const x2 = Math.max(boxRect.left, Math.min(boxRect.right, clientX));
+        const y2 = Math.max(boxRect.top, Math.min(boxRect.bottom, clientY));
+        const left = Math.min(x1, x2) - boxRect.left;
+        const top = Math.min(y1, y2) - boxRect.top;
+        const width = Math.abs(x2 - x1);
+        const height = Math.abs(y2 - y1);
+        rectEl.style.left = left + 'px';
+        rectEl.style.top = top + 'px';
+        rectEl.style.width = width + 'px';
+        rectEl.style.height = height + 'px';
+    }
+
+    document.addEventListener('mousemove', (e) => {
+        if (!grabDragState) return;
+        updateGrabRect(e.clientX, e.clientY);
+    });
+
+    document.addEventListener('mouseup', (e) => {
+        if (!grabDragState) return;
+        const { imgBox, img, ctx, startClientX, startClientY, rectEl } = grabDragState;
+        const endClientX = e.clientX, endClientY = e.clientY;
+        rectEl.remove();
+        grabDragState = null;
+
+        const dragDist = Math.hypot(endClientX - startClientX, endClientY - startClientY);
+        if (dragDist < 8) {
+            // 拖拽距离太小，视为误触，不触发识别，保持框选模式让用户重新拖拽
+            return;
+        }
+
+        const p1 = grabPointToNatural(img, startClientX, startClientY);
+        const p2 = grabPointToNatural(img, endClientX, endClientY);
+        if (!p1 || !p2) return;
+        const natX = Math.min(p1.x, p2.x);
+        const natY = Math.min(p1.y, p2.y);
+        const natW = Math.abs(p2.x - p1.x);
+        const natH = Math.abs(p2.y - p1.y);
+        if (natW < 4 || natH < 4) return;
+
+        // 单次框选完成后自动退出框选模式，恢复正常阅读交互（与 Snagit 的"一次性截取"体验一致）。
+        // 注意：这里用 setTimeout 延后关闭模式，而不是立刻同步关闭——因为浏览器会在
+        // mouseup 之后紧接着同步派发一次 click 事件，如果这里提前把 grabSelectModeActive
+        // 改回 false，会导致 imgBox 原有的"点击朗读"逻辑误判为一次普通点击而触发朗读。
+        runGrabTextOnRegion(imgBox, img, natX, natY, natW, natH, ctx);
+        setTimeout(() => setGrabSelectMode(false), 0);
+    });
+
+    function setGrabSelectMode(active) {
+        grabSelectModeActive = active;
+        grabSelectBtn.classList.toggle('active', active);
+        grabSelectBtn.textContent = active ? '✂️ 请在图片上拖拽选择区域（点击取消）' : '✂️ 框选抓取文字';
+        document.querySelectorAll('.page-img-box').forEach(box => {
+            box.classList.toggle('grab-select-mode', active);
+        });
+    }
+
+    grabSelectBtn.addEventListener('click', () => {
+        setGrabSelectMode(!grabSelectModeActive);
+    });
 
     // ============================================================
     // OCR 自动识别 - 使用 Tesseract.js
@@ -5375,6 +5949,9 @@ function hideWordCard() {
 }
 
     function renderSpread(autoSpeak) {
+    // 每次重新渲染跨页（翻页/全屏切换等）时，自动退出"框选抓取文字"模式，
+    // 避免旧的选框状态、旧的 DOM 引用残留导致异常
+    if (typeof setGrabSelectMode === 'function' && grabSelectModeActive) setGrabSelectMode(false);
     const story = getCurrentStory();
     const shouldPromptFolderSelection = !selectedFolderId || !story;
     
@@ -7043,32 +7620,7 @@ nextBtn.addEventListener('click', function() {
         input.click();
     }
 
-    batchImportBtn.addEventListener('click', () => {
-        if (batchRunning) {
-            alert('批量导入正在进行中，请等待完成');
-            return;
-        }
-
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.multiple = true;
-        input.accept = 'image/*';
-        input.style.display = 'none';
-        document.body.appendChild(input);
-
-        input.addEventListener('change', (e) => {
-            if (e.target.files && e.target.files.length > 0) {
-                const groups = analyzeFiles(e.target.files);
-                if (groups && groups.length > 0) {
-                    showBatchPreview(groups, 'image');
-                } else {
-                    alert('未能识别出任何绘本，请确保文件名格式正确（如 "01绘本名-01.jpg" 或 "绘本名 1.jpg"）');
-                }
-            }
-            input.remove();
-        });
-        input.click();
-    });
+    batchImportBtn.addEventListener('click', openPdfBatchModal);
 
     htmlGenerateBtn.addEventListener('click', openHtmlGeneratePicker);
 
@@ -7425,6 +7977,337 @@ nextBtn.addEventListener('click', function() {
     pdfConvertBtn.addEventListener('click', () => {
         // 在新窗口/标签页中打开 PDF 转图片工具
         window.open('pdfconvert.html', '_blank');
+    });
+
+    /* =====================================================================
+       ===== PDF批量生成 =====
+       "PDF批量生成"融合了原来两个独立按钮的功能，串成一条流水线：
+         1) 选择一个或多个 PDF（界面和转换算法与独立的「PDF转图片」工具完全一致，
+            该工具本身不做任何改动，仍可单独使用）；
+         2) 每个 PDF 逐页转换成高清 JPG 图片后，不再像之前那样打包成 ZIP 供本地
+            下载，而是直接以图片的形式上传到服务器目录
+            https://tappyreadjpeg-1325106148.cos.ap-guangzhou.myqcloud.com/jpeg/
+            （复用已有的腾讯云 COS 直传逻辑 uploadPageImageToCos，未做任何改动）；
+         3) 等这一批图片全部上传完成后，把这些图片交给原本"图片批量生成"识图片文件名
+            分组的那套逻辑（analyzeFiles → showBatchPreview → executeBatchImport，
+            三个函数本身一行都没有改动），像用户手动选中本地图片一样，自动按PDF文
+            件名分组生成对应的绘本（一个PDF ⇒ 一本绘本）。
+       ===================================================================== */
+    const pdfBatchOverlay = document.getElementById('pdfBatchOverlay');
+    const pdfBatchBox = document.getElementById('pdfBatchBox');
+    const pdfBatchHeader = document.getElementById('pdfBatchHeader');
+    const pdfBatchTitle = document.getElementById('pdfBatchTitle');
+    const closePdfBatchBtn = document.getElementById('closePdfBatchBtn');
+    const pdfBatchSelectStage = document.getElementById('pdfBatchSelectStage');
+    const pdfBatchProgressStage = document.getElementById('pdfBatchProgressStage');
+    const pdfDropzone = document.getElementById('pdfDropzone');
+    const pdfFileInput = document.getElementById('pdfFileInput');
+    const pdfFileCount = document.getElementById('pdfFileCount');
+    const pdfFileListWrap = document.getElementById('pdfFileListWrap');
+    const pdfFileList = document.getElementById('pdfFileList');
+    const startPdfBatchBtn = document.getElementById('startPdfBatchBtn');
+    const clearPdfBatchBtn = document.getElementById('clearPdfBatchBtn');
+    const pdfBatchStageLabel = document.getElementById('pdfBatchStageLabel');
+    const pdfProgressFill = document.getElementById('pdfProgressFill');
+    const pdfTotalFiles = document.getElementById('pdfTotalFiles');
+    const pdfTotalImages = document.getElementById('pdfTotalImages');
+    const pdfProcessedCount = document.getElementById('pdfProcessedCount');
+    const pdfProgressLog = document.getElementById('pdfProgressLog');
+    const cancelPdfBatchBtn = document.getElementById('cancelPdfBatchBtn');
+
+    let pdfBatchQueue = [];      // { name, file }
+    let pdfBatchRunning = false;
+    let pdfBatchCancelFlag = false;
+
+    // PDF.js Worker（与独立的 PDF转图片 工具使用同一个 CDN 版本，互不干扰）
+    if (typeof pdfjsLib !== 'undefined' && pdfjsLib.GlobalWorkerOptions && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+    }
+
+    // 清理文件名：与「PDF转图片」工具的 cleanFileName 逻辑保持一致，确保生成的
+    // 图片文件名（"绘本名 页码.jpg"）符合"图片批量生成"原有的分组识别规则
+    function pdfBatchCleanFileName(raw) {
+        let name = raw.replace(/\.pdf$/i, '');
+        let step1 = name.replace(/^[0-9]+-/, '');
+        let step2 = step1.replace(/_/g, ' ');
+        let result = step2.trim();
+        if (!result) result = 'book';
+        return result;
+    }
+
+    function pdfBatchFormatSize(bytes) {
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / 1048576).toFixed(1) + ' MB';
+    }
+
+    // Blob → dataURL（uploadPageImageToCos 需要 dataURL 才能转成上传用的二进制体）
+    function pdfBatchBlobToDataUrl(blob) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result || ''));
+            reader.onerror = () => reject(reader.error || new Error('读取图片失败'));
+            reader.readAsDataURL(blob);
+        });
+    }
+
+    // 核心：PDF → 图片。算法与独立的「PDF转图片」工具完全一致（相同的渲染比例、
+    // JPEG 质量、文件命名规则），只是这里返回的是内存中的 Blob 数组，不再打包 ZIP。
+    async function pdfBatchConvertToImages(file, cleanName, onPage) {
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        const totalPages = pdf.numPages;
+        const images = [];
+
+        for (let i = 1; i <= totalPages; i++) {
+            const page = await pdf.getPage(i);
+            const viewport = page.getViewport({ scale: 2.5 });
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+            await page.render({ canvasContext: context, viewport: viewport }).promise;
+
+            const imageData = canvas.toDataURL('image/jpeg', 0.92);
+            const base64Data = imageData.split(',')[1];
+            const byteString = atob(base64Data);
+            const byteArray = new Uint8Array(byteString.length);
+            for (let j = 0; j < byteString.length; j++) byteArray[j] = byteString.charCodeAt(j);
+
+            const filename = `${cleanName} ${i}.jpg`;
+            images.push({ blob: new Blob([byteArray], { type: 'image/jpeg' }), filename });
+            if (typeof onPage === 'function') onPage(i, totalPages);
+        }
+        return images;
+    }
+
+    function pdfBatchLog(msg) {
+        const div = document.createElement('div');
+        div.textContent = msg;
+        pdfProgressLog.appendChild(div);
+        pdfProgressLog.scrollTop = pdfProgressLog.scrollHeight;
+    }
+
+    function renderPdfBatchFileList() {
+        pdfFileCount.textContent = pdfBatchQueue.length;
+        if (pdfBatchQueue.length === 0) {
+            pdfFileListWrap.style.display = 'none';
+            pdfFileList.innerHTML = '';
+            startPdfBatchBtn.disabled = true;
+            return;
+        }
+        pdfFileListWrap.style.display = '';
+        startPdfBatchBtn.disabled = false;
+        pdfFileList.innerHTML = '';
+        pdfBatchQueue.forEach((item, idx) => {
+            const row = document.createElement('div');
+            row.className = 'batch-story-item';
+            const nameEl = document.createElement('span');
+            nameEl.className = 'b-name';
+            nameEl.textContent = '📄 ' + item.name;
+            const sizeEl = document.createElement('span');
+            sizeEl.className = 'pdf-size';
+            sizeEl.textContent = pdfBatchFormatSize(item.file.size);
+            const removeBtn = document.createElement('button');
+            removeBtn.type = 'button';
+            removeBtn.className = 'pdf-remove-btn';
+            removeBtn.textContent = '✕';
+            removeBtn.title = '移除';
+            removeBtn.addEventListener('click', () => {
+                pdfBatchQueue.splice(idx, 1);
+                renderPdfBatchFileList();
+            });
+            row.appendChild(nameEl);
+            row.appendChild(sizeEl);
+            row.appendChild(removeBtn);
+            pdfFileList.appendChild(row);
+        });
+    }
+
+    function addPdfBatchFiles(files) {
+        let added = 0;
+        for (const file of files) {
+            const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+            if (!isPdf) continue;
+            const exists = pdfBatchQueue.some(item => item.name === file.name && item.file.size === file.size);
+            if (exists) continue;
+            pdfBatchQueue.push({ name: file.name, file: file });
+            added++;
+        }
+        renderPdfBatchFileList();
+        if (added === 0) alert('没有添加到新的PDF文件（可能不是PDF格式，或文件已在列表中）');
+    }
+
+    function resetPdfBatchModal() {
+        pdfBatchQueue = [];
+        pdfBatchRunning = false;
+        pdfBatchCancelFlag = false;
+        pdfBatchTitle.textContent = '📄 PDF批量生成 - 选择PDF文件';
+        pdfBatchHeader.classList.remove('import-complete');
+        pdfBatchHeader.style.background = '';
+        pdfBatchSelectStage.style.display = '';
+        pdfBatchProgressStage.style.display = 'none';
+        pdfProgressFill.style.width = '0%';
+        pdfProgressFill.classList.remove('complete');
+        pdfProgressLog.innerHTML = '';
+        pdfTotalFiles.textContent = '0';
+        pdfTotalImages.textContent = '0';
+        pdfProcessedCount.textContent = '0';
+        renderPdfBatchFileList();
+    }
+
+    function openPdfBatchModal() {
+        if (batchRunning) {
+            alert('已有批量导入/生成正在进行中，请等待完成');
+            return;
+        }
+        resetPdfBatchModal();
+        pdfBatchOverlay.classList.add('open');
+    }
+
+    function closePdfBatchModal() {
+        if (pdfBatchRunning) {
+            if (!confirm('PDF正在转换/上传中，确定要取消并关闭吗？')) return;
+            pdfBatchCancelFlag = true;
+        }
+        pdfBatchOverlay.classList.remove('open');
+    }
+
+    async function startPdfBatchProcessing() {
+        if (pdfBatchRunning || pdfBatchQueue.length === 0) return;
+        pdfBatchRunning = true;
+        pdfBatchCancelFlag = false;
+        batchRunning = true; // 借用全局标记，避免与「图片批量生成/HTML一键生成」并发冲突
+
+        pdfBatchSelectStage.style.display = 'none';
+        pdfBatchProgressStage.style.display = '';
+        pdfBatchStageLabel.textContent = '正在转换 PDF 并上传图片到服务器...';
+        pdfTotalFiles.textContent = pdfBatchQueue.length;
+        pdfTotalImages.textContent = '0';
+        pdfProcessedCount.textContent = '0';
+        pdfProgressFill.style.width = '0%';
+        pdfProgressLog.innerHTML = '';
+        pdfBatchLog(`🚀 开始处理 ${pdfBatchQueue.length} 个PDF文件`);
+
+        const allGeneratedFiles = [];
+        let totalKnownImages = 0;
+        let processedImages = 0;
+        let failedPdfCount = 0;
+
+        const refreshProgress = () => {
+            const pct = totalKnownImages > 0 ? Math.round((processedImages / totalKnownImages) * 100) : 0;
+            pdfProgressFill.style.width = Math.min(pct, 100) + '%';
+            pdfProcessedCount.textContent = processedImages;
+            pdfTotalImages.textContent = totalKnownImages;
+        };
+
+        for (let idx = 0; idx < pdfBatchQueue.length; idx++) {
+            if (pdfBatchCancelFlag) { pdfBatchLog('⏹️ 已取消'); break; }
+            const item = pdfBatchQueue[idx];
+            pdfBatchLog(`🔄 正在转换: ${item.name}`);
+            try {
+                const cleanName = pdfBatchCleanFileName(item.name);
+                const images = await pdfBatchConvertToImages(item.file, cleanName, (pageNum, totalPages) => {
+                    totalKnownImages += 1;
+                    refreshProgress();
+                });
+                pdfBatchLog(`✅ ${item.name} → 共 ${images.length} 页，开始上传...`);
+
+                for (const img of images) {
+                    if (pdfBatchCancelFlag) break;
+                    try {
+                        const dataUrl = await pdfBatchBlobToDataUrl(img.blob);
+                        const result = await uploadPageImageToCos(img.filename, dataUrl);
+                        if (!result || !result.key) {
+                            pdfBatchLog(`  ⚠️ 上传失败: ${img.filename}`);
+                        } else {
+                            pdfBatchLog(`  ☁️ 已上传: ${img.filename}`);
+                        }
+                        allGeneratedFiles.push(new File([img.blob], img.filename, { type: 'image/jpeg' }));
+                    } catch (uploadErr) {
+                        pdfBatchLog(`  ⚠️ 上传出错: ${img.filename} - ${uploadErr.message}`);
+                        // 即使上传失败也保留在本地内存中的图片，后续仍可正常识别文字生成绘本，
+                        // 不会因为一张图片上传失败就丢掉整本绘本
+                        allGeneratedFiles.push(new File([img.blob], img.filename, { type: 'image/jpeg' }));
+                    }
+                    processedImages++;
+                    refreshProgress();
+                }
+            } catch (err) {
+                failedPdfCount++;
+                pdfBatchLog(`❌ ${item.name} 转换失败: ${err.message}`);
+            }
+        }
+
+        if (pdfBatchCancelFlag) {
+            pdfBatchTitle.textContent = '⏹️ 已取消';
+            pdfBatchHeader.style.background = 'var(--danger)';
+            pdfBatchLog('⏹️ 处理已取消');
+            pdfBatchRunning = false;
+            batchRunning = false;
+            return;
+        }
+
+        if (allGeneratedFiles.length === 0) {
+            pdfBatchTitle.textContent = '❌ 没有生成任何图片';
+            pdfBatchHeader.style.background = 'var(--danger)';
+            pdfBatchLog('❌ 所有PDF均转换失败，未生成任何图片');
+            pdfBatchRunning = false;
+            batchRunning = false;
+            return;
+        }
+
+        pdfBatchLog(`🎉 全部 ${allGeneratedFiles.length} 张图片已上传完成，开始识别文字并生成绘本...`);
+        pdfBatchStageLabel.textContent = '图片已全部上传，正在生成绘本预览...';
+        pdfBatchHeader.classList.add('import-complete');
+        pdfBatchTitle.textContent = '✅ 图片处理完成';
+
+        pdfBatchRunning = false;
+        batchRunning = false;
+
+        // ===== 关键：完全复用原「图片批量生成」的分组与导入逻辑，一行代码都没有改动 =====
+        // analyzeFiles 按文件名（"绘本名 页码.jpg"）自动分组、showBatchPreview 弹出预览、
+        // 确认后交给同样未作任何修改的 executeBatchImport 完成 OCR 识别与建绘本。
+        const groups = analyzeFiles(allGeneratedFiles);
+        pdfBatchOverlay.classList.remove('open');
+        if (groups && groups.length > 0) {
+            showBatchPreview(groups, 'image');
+        } else {
+            alert('图片已上传，但未能从PDF文件名自动识别出绘本分组，请检查PDF文件名是否规范');
+        }
+        if (failedPdfCount > 0) {
+            alert(`提示：有 ${failedPdfCount} 个PDF转换失败，已跳过，其余PDF已正常处理。`);
+        }
+    }
+
+    pdfDropzone.addEventListener('click', (e) => {
+        if (!e.target.closest('input')) pdfFileInput.click();
+    });
+    pdfDropzone.addEventListener('dragover', (e) => { e.preventDefault(); pdfDropzone.classList.add('drag'); });
+    pdfDropzone.addEventListener('dragleave', () => pdfDropzone.classList.remove('drag'));
+    pdfDropzone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        pdfDropzone.classList.remove('drag');
+        if (e.dataTransfer.files.length > 0) addPdfBatchFiles(e.dataTransfer.files);
+    });
+    pdfFileInput.addEventListener('change', function() {
+        if (this.files.length > 0) addPdfBatchFiles(this.files);
+        this.value = '';
+    });
+    clearPdfBatchBtn.addEventListener('click', () => {
+        if (pdfBatchRunning) return;
+        pdfBatchQueue = [];
+        renderPdfBatchFileList();
+    });
+    startPdfBatchBtn.addEventListener('click', startPdfBatchProcessing);
+    cancelPdfBatchBtn.addEventListener('click', () => {
+        if (!pdfBatchRunning) { pdfBatchOverlay.classList.remove('open'); return; }
+        pdfBatchCancelFlag = true;
+        pdfBatchLog('⏹️ 正在取消...');
+    });
+    closePdfBatchBtn.addEventListener('click', closePdfBatchModal);
+    pdfBatchOverlay.addEventListener('click', (e) => {
+        if (e.target === pdfBatchOverlay) closePdfBatchModal();
     });
 
     /* =====================================================================
