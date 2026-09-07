@@ -109,8 +109,8 @@ export default async function handler(req, res) {
     res.setHeader('Set-Cookie', `tappyread_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${days * 86400}`);
 
     // 新用户初始化默认绘本目录 + 写注册日志：都不阻塞响应，失败也不影响注册本身
-    initDefaultLibraryForNewUser(username);
-    writeLoginLog(username, 'register', req);
+    await initDefaultLibraryForNewUser(username);
+    await writeLoginLog(username, 'register', req);
 
     return sendJson(res, 201, { token, username, userId: result.insertId });
   } catch (error) {

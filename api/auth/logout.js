@@ -8,7 +8,7 @@ export default async function handler(req, res) {
     await getPool().execute('DELETE FROM sessions WHERE token_hash = ?', [hashToken(token)]);
   }
   // 回填这次会话的在线时长到登录日志，不阻塞响应、失败也不影响退出登录
-  if (user) fillLoginLogDuration(user.username);
+  if (user) await fillLoginLogDuration(user.username);
   res.setHeader('Set-Cookie', 'tappyread_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');
   res.json({ ok: true });
 }
