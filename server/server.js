@@ -251,15 +251,20 @@ function putCosTextObject(key, text, contentType = 'text/html; charset=utf-8') {
   });
 }
 
-/** 删除 COS 对象（可批量） */
-function deleteCosObjects(keys) {
-  return new Promise((resolve, reject) => {
-    cosClient.deleteMultipleObject({
-      Bucket: COS_BUCKET,
-      Region: COS_REGION,
-      Objects: keys.map(Key => ({ Key }))
-    }, (err, data) => err ? reject(err) : resolve(data));
-  });
+/** 删除 COS 对象（可批量）。腾讯云 deleteMultipleObject 单次最多支持 1000 个
+ *  对象，这里按 900 一批切分请求，避免绘本页数很多时一次删不干净。 */
+async function deleteCosObjects(keys) {
+  const chunkSize = 900;
+  for (let i = 0; i < keys.length; i += chunkSize) {
+    const chunk = keys.slice(i, i + chunkSize);
+    await new Promise((resolve, reject) => {
+      cosClient.deleteMultipleObject({
+        Bucket: COS_BUCKET,
+        Region: COS_REGION,
+        Objects: chunk.map(Key => ({ Key }))
+      }, (err, data) => err ? reject(err) : resolve(data));
+    });
+  }
 }
 
 app.use(express.json({ limit: '200mb' }));
@@ -318,6 +323,128 @@ async function issueSession(userId, res) {
   return token;
 }
 
+/* =====================================================================
+   登录日志（loginlog）：记录注册 / 登录行为，字段包括用户名、操作时间、
+   在线时长、IP 归属地（省市）。
+   ===================================================================== */
+let loginLogTableReady = false;
+async function ensureLoginLogTable() {
+  if (loginLogTableReady) return;
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS loginlog (
+      id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      username VARCHAR(64) NOT NULL COMMENT '用户名',
+      action VARCHAR(20) NOT NULL COMMENT '行为类型：register 注册 / login 登录',
+      action_time DATETIME NOT NULL COMMENT '操作时间',
+      duration_seconds INT UNSIGNED NULL COMMENT '本次登录在线时长（秒），退出登录时回填',
+      ip VARCHAR(64) NULL COMMENT '客户端 IP',
+      ip_region VARCHAR(100) NULL COMMENT 'IP 归属地（省市）',
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      KEY idx_username (username),
+      KEY idx_action_time (action_time)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+  loginLogTableReady = true;
+}
+
+/** 取客户端真实 IP（优先取反向代理传入的 X-Forwarded-For 第一个地址） */
+function getClientIp(req) {
+  const xff = req.headers['x-forwarded-for'];
+  if (xff) return String(xff).split(',')[0].trim();
+  return req.socket?.remoteAddress || req.connection?.remoteAddress || '';
+}
+
+/** IP → 省市归属地。使用 ip-api.com 免费查询接口，2 秒超时，查询失败不影响主流程 */
+async function lookupIpRegion(ip) {
+  if (!ip) return null;
+  const bare = ip.replace(/^::ffff:/, '');
+  if (bare === '127.0.0.1' || bare === '::1' || bare.startsWith('192.168.') || bare.startsWith('10.') || bare.startsWith('172.')) {
+    return '本地/内网';
+  }
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 2000);
+    const resp = await fetch(`http://ip-api.com/json/${encodeURIComponent(bare)}?lang=zh-CN&fields=status,regionName,city`, { signal: controller.signal });
+    clearTimeout(timer);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    if (data.status !== 'success') return null;
+    return [data.regionName, data.city].filter(Boolean).join(' ') || null;
+  } catch (error) {
+    return null;
+  }
+}
+
+/** 写入一条登录日志（注册/登录），失败只打日志、不影响注册或登录本身 */
+async function writeLoginLog(username, action, req) {
+  try {
+    await ensureLoginLogTable();
+    const ip = getClientIp(req);
+    const ipRegion = await lookupIpRegion(ip);
+    await pool.execute(
+      'INSERT INTO loginlog (username, action, action_time, ip, ip_region) VALUES (?, ?, NOW(), ?, ?)',
+      [username, action, ip || null, ipRegion || null]
+    );
+  } catch (error) {
+    console.warn('写入登录日志失败（不影响注册/登录）:', error.message);
+  }
+}
+
+/** 退出登录时，把这次会话的在线时长回填到最近一条未回填的日志记录里 */
+async function fillLoginLogDuration(username) {
+  try {
+    await ensureLoginLogTable();
+    await pool.execute(
+      `UPDATE loginlog
+       SET duration_seconds = TIMESTAMPDIFF(SECOND, action_time, NOW())
+       WHERE username = ? AND duration_seconds IS NULL
+       ORDER BY action_time DESC LIMIT 1`,
+      [username]
+    );
+  } catch (error) {
+    console.warn('回填登录日志在线时长失败（不影响退出登录）:', error.message);
+  }
+}
+
+/* =====================================================================
+   新注册用户默认绘本目录：从 COS 模板 jpeg/start.json 拉取一份默认绘本目录，
+   写入这个新用户自己的 json/{username}.json，保证新用户登录后自带该绘本。
+   ===================================================================== */
+const START_TEMPLATE_URL = process.env.START_TEMPLATE_URL
+  || `https://${COS_BUCKET}.cos.${COS_REGION}.myqcloud.com/${COS_JSON_DIR}/start.json`;
+
+async function fetchStartTemplate() {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    const resp = await fetch(START_TEMPLATE_URL, { signal: controller.signal });
+    clearTimeout(timer);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    if (!data || !Array.isArray(data.tree)) return null;
+    return data;
+  } catch (error) {
+    console.warn('获取默认绘本模板 start.json 失败（不影响注册）:', error.message);
+    return null;
+  }
+}
+
+/** 新用户注册成功后，初始化默认绘本目录（失败不影响注册本身） */
+async function initDefaultLibraryForNewUser(username) {
+  try {
+    const template = await fetchStartTemplate();
+    if (!template) return;
+    await syncLibraryToCos(username, {
+      tree: template.tree,
+      collapsed: Array.isArray(template.collapsed) ? template.collapsed : [],
+      selectedFolderId: template.selectedFolderId || null,
+      currentStoryId: template.currentStoryId || null
+    });
+  } catch (error) {
+    console.warn('初始化新用户默认绘本目录失败（不影响注册）:', error.message);
+  }
+}
+
 app.post('/api/auth/login', async (req, res) => {
   try {
     const username = String(req.body.username || '').trim();
@@ -336,6 +463,8 @@ app.post('/api/auth/login', async (req, res) => {
     if (!isValid) return res.status(401).json({ error: '用户名或密码错误，请重试' });
 
     const token = await issueSession(rows[0].id, res);
+    // 登录日志：不阻塞响应，失败也不影响登录本身
+    writeLoginLog(rows[0].username, 'login', req);
     res.json({ token, userId: rows[0].id, username: rows[0].username });
   } catch (error) {
     sendDatabaseError(res, error);
@@ -348,15 +477,27 @@ app.post('/api/auth/register', async (req, res) => {
     const password = String(req.body.password || '');
     if (!username || !password) return res.status(400).json({ error: '用户名和密码不能为空' });
 
+    // 🔧 修复：注册前先显式校验用户名是否已存在，而不是仅仅依赖数据库唯一索引
+    // 抛出的 ER_DUP_ENTRY 错误——如果 users 表当初建表时没有对 username 加
+    // UNIQUE 约束，重复用户名会被直接插入成功，校验形同虚设。
+    const [existing] = await pool.execute('SELECT id FROM users WHERE username = ? LIMIT 1', [username]);
+    if (existing.length) return res.status(409).json({ error: '用户名已存在，请修改后重试!' });
+
     const passwordHash = await bcrypt.hash(password, 12);
     const [result] = await pool.execute(
       'INSERT INTO users (username, password) VALUES (?, ?)',
       [username, passwordHash]
     );
     const token = await issueSession(result.insertId, res);
+
+    // 新用户初始化默认绘本目录（从 COS 模板 jpeg/start.json 拉取），失败不影响注册本身
+    await initDefaultLibraryForNewUser(username);
+    // 注册日志：不阻塞响应，失败也不影响注册本身
+    writeLoginLog(username, 'register', req);
+
     res.status(201).json({ token, userId: result.insertId, username });
   } catch (error) {
-    if (error.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: '用户名已存在，请修改用户名重试！' });
+    if (error.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: '用户名已存在，请修改后重试!' });
     sendDatabaseError(res, error);
   }
 });
@@ -369,6 +510,8 @@ app.get('/api/auth/me', authenticate, async (req, res) => {
 app.post('/api/auth/logout', authenticate, async (req, res) => {
   try {
     await pool.execute('DELETE FROM sessions WHERE token_hash = ?', [hashToken(req.sessionToken)]);
+    // 回填这次会话的在线时长到登录日志，不阻塞响应、失败也不影响退出登录
+    fillLoginLogDuration(req.user.username);
     res.clearCookie('tappyread_session');
     res.json({ ok: true });
   } catch (error) {
@@ -532,6 +675,8 @@ app.post('/api/images/delete', authenticate, async (req, res) => {
   try {
     const keys = Array.isArray(req.body.keys) ? req.body.keys : [];
     const userPrefix = `u${req.user.id}_`;
+    // 单次最多接受 2000 个 key（覆盖绝大多数绘本的图片数量）；之前的 200 上限
+    // 对页数较多的绘本明显不够，会导致删不干净、COS 里残留部分对象。
     const safeKeys = keys
       .map(k => String(k || '').trim())
       .filter(k => {
@@ -539,7 +684,7 @@ app.post('/api/images/delete', authenticate, async (req, res) => {
         const htmlPrefix = `${COS_HTML_DIR}/${userPrefix}`;
         return k.startsWith(imgPrefix) || k.startsWith(htmlPrefix);
       })
-      .slice(0, 200);
+      .slice(0, 2000);
     if (!safeKeys.length) return res.json({ ok: true, deleted: 0, skipped: keys.length });
     await deleteCosObjects(safeKeys);
     res.json({ ok: true, deleted: safeKeys.length, skipped: keys.length - safeKeys.length });

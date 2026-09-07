@@ -1,0 +1,35 @@
+{
+  "_说明": "这是新用户默认绘本目录的模板示例，请参考这个结构自己整理内容后，上传到 COS 存储桶的 jpeg/start.json（即 https://tappyreadjpeg-1325106148.cos.ap-guangzhou.myqcloud.com/jpeg/start.json）。cosKey 建议直接指向已经放在 jpeg/ 目录下的公共图片（不要带 u{用户id}_ 前缀，这样所有新用户共用同一份图片，不用给每个新用户单独复制一份图片）。",
+  "tree": [
+    {
+      "id": "starter-folder",
+      "type": "folder",
+      "name": "新手入门",
+      "sortKey": 1,
+      "children": [
+        {
+          "id": "starter-story",
+          "type": "story",
+          "title": "欢迎使用点读机",
+          "builtin": false,
+          "sortKey": 1,
+          "pages": [
+            {
+              "file": "start 1.jpg",
+              "text": "Welcome to TappyRead!",
+              "cosKey": "jpeg/start 1.jpg"
+            },
+            {
+              "file": "start 2.jpg",
+              "text": "Tap any page to hear it read aloud.",
+              "cosKey": "jpeg/start 2.jpg"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "collapsed": [],
+  "selectedFolderId": null,
+  "currentStoryId": null
+}

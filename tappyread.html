@@ -1398,7 +1398,7 @@ body.reader-fullscreen .stage-wrap {
                     <div class="dropzone" id="pdfDropzone">
                         <div class="icon">📄</div>
                         <div>点击选择PDF，或把多个PDF文件一起拖到这里</div>
-                        <small>每一页会被转换为高清JPG图片，自动上传到服务器后再自动识别文字生成绘本</small>
+                        <small>每一页会被转换为高清JPG图片，随后自动识别文字并生成绘本（图片会在生成绘本的同时自动上传到服务器）</small>
                         <input type="file" id="pdfFileInput" accept=".pdf,application/pdf" multiple style="display:none">
                     </div>
                     <div class="hint-text">已选择 <span id="pdfFileCount">0</span> 个PDF文件</div>
@@ -5099,37 +5099,15 @@ async function autoOcrCurrentSpread() {
             imgBox.dataset.ocrDone = 'true';
             continue;
         }
-        
-        // 显示识别中状态
-        showOcrStatus(imgBox, '⏳ 识别中...');
-        
-        try {
-            const worker = await getOcrWorkerInstance();
-            if (!worker) {
-                showOcrStatus(imgBox, '⚠️ 引擎未就绪');
-                continue;
-            }
-            
-            const { data } = await worker.recognize(img.src);
-            const rawText = data.text || '';
-            // 使用已有的清洗函数
-            const cleanedText = typeof cleanOcrTextEnhanced === 'function' 
-                ? cleanOcrTextEnhanced(rawText) 
-                : rawText.replace(/\s+/g, ' ').trim();
-            
-            if (cleanedText && cleanedText.length > 2) {
-                info.page.text = cleanedText;
-                createTextOverlay(imgBox, cleanedText);
-                imgBox.dataset.ocrDone = 'true';
-                renderTree();
-                saveLibrary();
-            } else {
-                showOcrStatus(imgBox, '⚠️ 未识别到文字');
-            }
-        } catch (err) {
-            console.warn('OCR 识别失败:', err);
-            showOcrStatus(imgBox, '❌ 识别失败');
-        }
+
+        // 🔧 修复：绘本页面不存在朗读文本内容时，禁用自动识别功能——不再自动
+        // 调用 OCR 去"猜"这一页的文字。原因：这类页面往往是封面、插图、空白
+        // 过渡页等本来就没有文字的页面，之前每次翻到这种页都会自动跑一次
+        // OCR，既容易识别出不准确/无意义的内容，也白白消耗性能和用户等待时间。
+        // 如果确实需要为这类页面补充朗读文本，请使用页面右上角的"✏️"手动编辑，
+        // 或使用"✂️ 框选抓取文字 / 右键抓取文字"功能手动识别后再确认写入。
+        imgBox.dataset.ocrDone = 'true';
+        continue;
     }
 }
 
@@ -8181,7 +8159,7 @@ nextBtn.addEventListener('click', function() {
 
         pdfBatchSelectStage.style.display = 'none';
         pdfBatchProgressStage.style.display = '';
-        pdfBatchStageLabel.textContent = '正在转换 PDF 并上传图片到服务器...';
+        pdfBatchStageLabel.textContent = '正在转换 PDF 页面为图片...';
         pdfTotalFiles.textContent = pdfBatchQueue.length;
         pdfTotalImages.textContent = '0';
         pdfProcessedCount.textContent = '0';
@@ -8211,25 +8189,19 @@ nextBtn.addEventListener('click', function() {
                     totalKnownImages += 1;
                     refreshProgress();
                 });
-                pdfBatchLog(`✅ ${item.name} → 共 ${images.length} 页，开始上传...`);
+                pdfBatchLog(`✅ ${item.name} → 共 ${images.length} 页`);
 
+                // 注意：这里只做"PDF → 图片"的转换，不在这一步单独上传到 COS。
+                // 原因（修复"删除绘本后 COS 残留一半图片"的 bug）：下面会把这些图片交给
+                // 与"图片批量生成"完全相同的 analyzeFiles → showBatchPreview →
+                // executeBatchImport 流程，而 executeBatchImport 自己就会把每张图片
+                // 上传到 COS 并把返回的 cosKey 回填到对应页面。如果这里再额外上传一次，
+                // 每张图片就会在 COS 里产生两个对象，但页面上只记录得住其中一个的
+                // cosKey——另一个就成了"删除绘本时找不到、永远清理不掉"的孤儿文件，
+                // 这正是之前 62 张图片只删掉 31 张的根本原因。现在改成只上传一次。
                 for (const img of images) {
                     if (pdfBatchCancelFlag) break;
-                    try {
-                        const dataUrl = await pdfBatchBlobToDataUrl(img.blob);
-                        const result = await uploadPageImageToCos(img.filename, dataUrl);
-                        if (!result || !result.key) {
-                            pdfBatchLog(`  ⚠️ 上传失败: ${img.filename}`);
-                        } else {
-                            pdfBatchLog(`  ☁️ 已上传: ${img.filename}`);
-                        }
-                        allGeneratedFiles.push(new File([img.blob], img.filename, { type: 'image/jpeg' }));
-                    } catch (uploadErr) {
-                        pdfBatchLog(`  ⚠️ 上传出错: ${img.filename} - ${uploadErr.message}`);
-                        // 即使上传失败也保留在本地内存中的图片，后续仍可正常识别文字生成绘本，
-                        // 不会因为一张图片上传失败就丢掉整本绘本
-                        allGeneratedFiles.push(new File([img.blob], img.filename, { type: 'image/jpeg' }));
-                    }
+                    allGeneratedFiles.push(new File([img.blob], img.filename, { type: 'image/jpeg' }));
                     processedImages++;
                     refreshProgress();
                 }
@@ -8257,8 +8229,8 @@ nextBtn.addEventListener('click', function() {
             return;
         }
 
-        pdfBatchLog(`🎉 全部 ${allGeneratedFiles.length} 张图片已上传完成，开始识别文字并生成绘本...`);
-        pdfBatchStageLabel.textContent = '图片已全部上传，正在生成绘本预览...';
+        pdfBatchLog(`🎉 全部 ${allGeneratedFiles.length} 张图片转换完成，开始识别文字并生成绘本（图片会在生成绘本时自动上传到服务器）...`);
+        pdfBatchStageLabel.textContent = '转换完成，正在生成绘本预览...';
         pdfBatchHeader.classList.add('import-complete');
         pdfBatchTitle.textContent = '✅ 图片处理完成';
 
@@ -8267,13 +8239,14 @@ nextBtn.addEventListener('click', function() {
 
         // ===== 关键：完全复用原「图片批量生成」的分组与导入逻辑，一行代码都没有改动 =====
         // analyzeFiles 按文件名（"绘本名 页码.jpg"）自动分组、showBatchPreview 弹出预览、
-        // 确认后交给同样未作任何修改的 executeBatchImport 完成 OCR 识别与建绘本。
+        // 确认后交给同样未作任何修改的 executeBatchImport 完成 OCR 识别、建绘本、以及
+        // 唯一的一次 COS 上传（并把 cosKey 回填到页面上，确保以后删除绘本时能找全）。
         const groups = analyzeFiles(allGeneratedFiles);
         pdfBatchOverlay.classList.remove('open');
         if (groups && groups.length > 0) {
             showBatchPreview(groups, 'image');
         } else {
-            alert('图片已上传，但未能从PDF文件名自动识别出绘本分组，请检查PDF文件名是否规范');
+            alert('图片转换完成，但未能从PDF文件名自动识别出绘本分组，请检查PDF文件名是否规范');
         }
         if (failedPdfCount > 0) {
             alert(`提示：有 ${failedPdfCount} 个PDF转换失败，已跳过，其余PDF已正常处理。`);

@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import mysql from 'mysql2/promise';
 import bcrypt from 'bcryptjs';
+import { writeLoginLog } from '../_mysql.js';
 
 let pool;
 
@@ -54,6 +55,8 @@ export default async function handler(req, res) {
       [hashToken(token), rows[0].id, expiresAt]
     );
     res.setHeader('Set-Cookie', `tappyread_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${Number(process.env.SESSION_DAYS || 7) * 86400}`);
+    // 登录日志：不阻塞响应，失败也不影响登录本身
+    writeLoginLog(rows[0].username, 'login', req);
     sendJson(res, 200, { token, username: rows[0].username, userId: rows[0].id });
   } catch (error) {
     console.error('Vercel login error:', error);
