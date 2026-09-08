@@ -410,21 +410,17 @@ async function fillLoginLogDuration(username) {
    新注册用户默认绘本目录：从 COS 模板 jpeg/start.json 拉取一份默认绘本目录，
    写入这个新用户自己的 json/{username}.json，保证新用户登录后自带该绘本。
    ===================================================================== */
-const START_TEMPLATE_URL = process.env.START_TEMPLATE_URL
-  || `https://${COS_BUCKET}.cos.${COS_REGION}.myqcloud.com/${COS_JSON_DIR}/start.json`;
+// const START_TEMPLATE_URL = process.env.START_TEMPLATE_URL
+//   || `https://${COS_BUCKET}.cos.${COS_REGION}.myqcloud.com/${COS_JSON_DIR}/start.json`;
 
-async function fetchStartTemplate() {
+function loadStartTemplate() {
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5000);
-    const resp = await fetch(START_TEMPLATE_URL, { signal: controller.signal });
-    clearTimeout(timer);
-    if (!resp.ok) return null;
-    const data = await resp.json();
+    const raw = fs.readFileSync(new URL('./start-template.json', import.meta.url), 'utf8');
+    const data = JSON.parse(raw);
     if (!data || !Array.isArray(data.tree)) return null;
     return data;
   } catch (error) {
-    console.warn('获取默认绘本模板 start.json 失败（不影响注册）:', error.message);
+    console.warn('读取本地默认绘本模板失败（不影响注册）:', error.message);
     return null;
   }
 }
@@ -432,7 +428,8 @@ async function fetchStartTemplate() {
 /** 新用户注册成功后，初始化默认绘本目录（失败不影响注册本身） */
 async function initDefaultLibraryForNewUser(username) {
   try {
-    const template = await fetchStartTemplate();
+    // const template = await fetchStartTemplate();
+    const template = loadStartTemplate();
     if (!template) return;
     await syncLibraryToCos(username, {
       tree: template.tree,

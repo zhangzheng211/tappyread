@@ -3,6 +3,7 @@ import mysql from 'mysql2/promise';
 import bcrypt from 'bcryptjs';
 import COS from 'cos-nodejs-sdk-v5';
 import { writeLoginLog } from '../_mysql.js';
+import fs from 'node:fs';
 
 let pool;
 function getPool() {
@@ -25,8 +26,8 @@ const COS_BUCKET = process.env.COS_BUCKET || 'tappyreadjpeg-1325106148';
 const COS_REGION = process.env.COS_REGION || 'ap-guangzhou';
 const COS_IMG_DIR = (process.env.COS_IMG_DIR || 'jpeg').replace(/\/+$/, '');
 const COS_JSON_DIR = (process.env.COS_JSON_DIR || 'json').replace(/\/+$/, '');
-const START_TEMPLATE_URL = process.env.START_TEMPLATE_URL
-  || `https://${COS_BUCKET}.cos.${COS_REGION}.myqcloud.com/${COS_JSON_DIR}/start.json`;
+// const START_TEMPLATE_URL = process.env.START_TEMPLATE_URL
+//   || `https://${COS_BUCKET}.cos.${COS_REGION}.myqcloud.com/${COS_JSON_DIR}/start.json`;
 const cosConfigured = Boolean(process.env.COS_SECRET_ID && process.env.COS_SECRET_KEY);
 const cosClient = cosConfigured
   ? new COS({ SecretId: process.env.COS_SECRET_ID, SecretKey: process.env.COS_SECRET_KEY })
@@ -39,18 +40,17 @@ function sanitizeUsername(name) {
     .slice(0, 40) || 'guest';
 }
 
-async function fetchStartTemplate() {
+// 默认绘本模板直接打包进部署包本地读取，不再通过网络请求 COS——
+// 彻底消除因跨地域网络延迟/COS抖动导致偶发超时失败的问题。
+// 以后要更新默认绘本内容，改 start-template.json 后重新部署（git push）即可。
+function loadStartTemplate() {
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8000);
-    const resp = await fetch(START_TEMPLATE_URL, { signal: controller.signal });
-    clearTimeout(timer);
-    if (!resp.ok) return null;
-    const data = await resp.json();
+    const raw = fs.readFileSync(new URL('./start-template.json', import.meta.url), 'utf8');
+    const data = JSON.parse(raw);
     if (!data || !Array.isArray(data.tree)) return null;
     return data;
   } catch (error) {
-    console.warn('获取默认绘本模板 start.json 失败（不影响注册）:', error.message);
+    console.warn('读取本地默认绘本模板失败（不影响注册）:', error.message);
     return null;
   }
 }
@@ -70,7 +70,8 @@ function putCosTextObject(key, text) {
 async function initDefaultLibraryForNewUser(username) {
   if (!cosConfigured) return;
   try {
-    const template = await fetchStartTemplate();
+    // const template = await fetchStartTemplate();
+    const template = loadStartTemplate();
     if (!template) return;
     const safeUsername = sanitizeUsername(username).replace(/_+$/g, '') || 'guest';
     const canonicalKey = `${COS_JSON_DIR}/${safeUsername}.json`;
