@@ -433,38 +433,26 @@ async function fillLoginLogDuration(username) {
 }
 
 /* =====================================================================
-   新注册用户默认绘本目录：从 COS 模板 json/start.json 拉取一份默认绘本目录，
+   新注册用户默认绘本目录：从 COS 模板 jpeg/start.json 拉取一份默认绘本目录，
    写入这个新用户自己的 json/{username}.json，保证新用户登录后自带该绘本。
    ===================================================================== */
+const START_TEMPLATE_URL = process.env.START_TEMPLATE_URL
+  || `https://${COS_BUCKET}.cos.${COS_REGION}.myqcloud.com/${COS_JSON_DIR}/start.json`;
 
-// 🔧 修复：之前这里用不带身份认证的公网 fetch() 直接请求 json/start.json，
-// 而 json/ 目录跟 jpeg/ 不一样，项目里所有读取它的地方（比如上面读用户绘本库
-// 用的 cosClient.getObject）全部走的是带密钥认证的 COS SDK，说明这个目录
-// 大概率从没开过公有读权限——公网直接 fetch 大概率会被 COS 返回 403 拒绝
-// 访问，resp.ok 为 false，函数直接返回 null，表现为"注册成功但没有默认绘本"。
-// 现在改成跟读用户绘本库完全一样的方式：用带密钥认证的 COS SDK 直接读，
-// 不再依赖 json/ 目录的公有读设置，从根上排除这一类权限问题。
-function fetchStartTemplate() {
-  return new Promise((resolve) => {
-    if (!cosConfigured) return resolve(null);
-    const key = `${COS_JSON_DIR}/start.json`;
-    const timer = setTimeout(() => resolve(null), 8000);
-    cosClient.getObject({ Bucket: COS_BUCKET, Region: COS_REGION, Key: key }, (err, data) => {
-      clearTimeout(timer);
-      if (err) {
-        console.warn('获取默认绘本模板 start.json 失败（不影响注册）:', err.message);
-        return resolve(null);
-      }
-      try {
-        const parsed = JSON.parse(data.Body.toString('utf8'));
-        if (!parsed || !Array.isArray(parsed.tree)) return resolve(null);
-        resolve(parsed);
-      } catch (parseErr) {
-        console.warn('默认绘本模板 start.json 内容不是合法JSON（不影响注册）:', parseErr.message);
-        resolve(null);
-      }
-    });
-  });
+async function fetchStartTemplate() {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    const resp = await fetch(START_TEMPLATE_URL, { signal: controller.signal });
+    clearTimeout(timer);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    if (!data || !Array.isArray(data.tree)) return null;
+    return data;
+  } catch (error) {
+    console.warn('获取默认绘本模板 start.json 失败（不影响注册）:', error.message);
+    return null;
+  }
 }
 
 /** 新用户注册成功后，初始化默认绘本目录（失败不影响注册本身） */
