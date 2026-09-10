@@ -26,6 +26,15 @@ function sanitizeFileName(name) {
   return base.replace(/[^\w.\-\u4e00-\u9fa5]/g, '_').slice(0, 120) || 'image';
 }
 
+/** 🆕 绘本名称 → COS 文件夹名清洗：不能用 split('/').pop()（那是给文件名用的，
+ *  遇到标题本身带斜杠会被截断丢字），而是把 / \ 等非法字符统一替换成下划线，
+ *  保留标题整体作为一个文件夹名。 */
+function sanitizeStoryFolderName(name) {
+  const raw = String(name || '').trim();
+  const safe = raw.replace(/[\\/]/g, '_').replace(/[^\w.\-\u4e00-\u9fa5]/g, '_').slice(0, 80);
+  return safe || 'untitled';
+}
+
 /** 上传单张图片到 COS */
 function putCosObject(key, buffer) {
   return new Promise((resolve, reject) => {
@@ -53,8 +62,10 @@ export default async function handler(req, res) {
     const buffer = Buffer.from(match[2], 'base64');
     if (!buffer.length) return sendJson(res, 400, { error: '图片内容为空' });
 
-    // 对象键带 u{userId}_ 前缀，实现用户间隔离
-    const key = `${COS_IMG_DIR}/u${user.id}_${Date.now()}_${sanitizeFileName(fileName)}`;
+    // 对象键带 u{userId}_ 前缀，实现用户间隔离；
+    // 🆕 新增"绘本名称文件夹"层级：传了 storyName 时，图片存到 jpeg/{绘本名}/ 子目录下
+    const storyFolder = req.body?.storyName ? sanitizeStoryFolderName(req.body.storyName) + '/' : '';
+    const key = `${COS_IMG_DIR}/${storyFolder}u${user.id}_${Date.now()}_${sanitizeFileName(fileName)}`;
     await putCosObject(key, buffer);
     return sendJson(res, 200, { ok: true, key, url: COS_BASE_URL + key });
   } catch (error) {

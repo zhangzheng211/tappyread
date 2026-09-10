@@ -36,6 +36,23 @@ async function deleteCosObjects(keys) {
   }
 }
 
+/** 🆕 判断 key 是否属于当前用户在 dir 目录下的对象。
+ *  兼容两种结构：
+ *    旧的扁平结构：  {dir}/u{userId}_...
+ *    新的分文件夹结构：{dir}/{绘本名称}/u{userId}_...（只允许恰好一层文件夹）
+ */
+function keyMatchesUserPrefix(key, dir, userId) {
+  const userToken = `u${userId}_`;
+  if (key.startsWith(`${dir}/${userToken}`)) return true;
+  const dirPrefix = `${dir}/`;
+  if (!key.startsWith(dirPrefix)) return false;
+  const rest = key.slice(dirPrefix.length);
+  const slashIdx = rest.indexOf('/');
+  if (slashIdx === -1) return false;
+  const afterFolder = rest.slice(slashIdx + 1);
+  return afterFolder.startsWith(userToken);
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return sendJson(res, 405, { error: '请求方法不允许' });
   const user = await authenticate(req);
@@ -43,18 +60,15 @@ export default async function handler(req, res) {
   if (!cosConfigured) return sendCosConfigError(res);
   try {
     const keys = Array.isArray(req.body?.keys) ? req.body.keys : [];
-    // 仅允许删除当前用户上传的（u{userId}_ 前缀）对象，防止越权删除。
-    // 🔧 修复：之前这里只放行 jpeg/ 图片目录的前缀，绘本页面若是 HTML 类型
-    // （对应 html/ 目录下的 htmlCosKey），会被这里的前缀过滤直接挡掉、
-    // 永远删不掉，导致删除绘本后 COS 里仍然残留部分对象。现在与
-    // server/server.js 保持一致，同时放行 jpeg/ 与 html/ 两个目录前缀。
-    const imgPrefix = `${COS_IMG_DIR}/u${user.id}_`;
-    const htmlPrefix = `${COS_HTML_DIR}/u${user.id}_`;
+    // 仅允许删除当前用户上传的对象，防止越权删除。
+    // 🆕 图片路径现在可能带"绘本名称文件夹"这一层（jpeg/{绘本名}/u{id}_...），
+    // 用 keyMatchesUserPrefix 同时兼容新旧两种结构，否则按绘本名分文件夹后，
+    // 删除绘本时这里的前缀过滤会把新结构的 key 全部误判为"越权"而拒绝删除。
     // 单次最多接受 2000 个 key（覆盖绝大多数绘本的图片数量），避免请求体过大；
     // 之前的 200 上限对页数较多的绘本明显不够，也会导致删不干净。
     const safeKeys = keys
       .map(k => String(k || '').trim())
-      .filter(k => k.startsWith(imgPrefix) || k.startsWith(htmlPrefix))
+      .filter(k => keyMatchesUserPrefix(k, COS_IMG_DIR, user.id) || keyMatchesUserPrefix(k, COS_HTML_DIR, user.id))
       .slice(0, 2000);
     if (!safeKeys.length) return sendJson(res, 200, { ok: true, deleted: 0, skipped: keys.length });
     await deleteCosObjects(safeKeys);

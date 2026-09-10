@@ -2230,30 +2230,6 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
         return 'jpeg/' + folder + 'u' + __userId + '_' + Date.now() + '_' + sanitizeNameForCos(fileName || 'page.jpg');
     }
 
-    // 🆕 兼容旧数据：图片存储路径改成"按绘本名称分文件夹"之后，可能仍会遇到
-    // cosKey 是旧的扁平路径的情况（比如导入了改造前导出的历史绘本库备份，
-    // 或者是改造前就已上传、还没跑过迁移脚本的图片）。这里根据当前 cosKey
-    // 的结构，反推出"另一种可能的路径"，供图片加载失败时兜底重试：
-    //   - cosKey 是旧的扁平结构（jpeg/u{id}_...）→ 尝试按当前绘本标题拼出
-    //     新的分文件夹路径（jpeg/{当前标题}/u{id}_...）
-    //   - cosKey 已经是分文件夹结构 → 尝试去掉文件夹层，还原成旧的扁平路径
-    //     （用于绘本改名后，历史 cosKey 里的文件夹名和当前标题对不上的情况）
-    function buildAlternateCosKey(cosKey, storyTitle){
-        if (!cosKey || typeof cosKey !== 'string' || !cosKey.startsWith('jpeg/')) return null;
-        const rest = cosKey.slice('jpeg/'.length);
-        const isFlat = /^u\d+_/.test(rest);
-        if (isFlat) {
-            const folder = storyTitle ? sanitizeStoryNameForCosFolder(storyTitle) : '';
-            if (!folder) return null;
-            return 'jpeg/' + folder + '/' + rest;
-        }
-        const slashIdx = rest.indexOf('/');
-        if (slashIdx === -1) return null;
-        const afterFolder = rest.slice(slashIdx + 1);
-        if (!/^u\d+_/.test(afterFolder)) return null;
-        return 'jpeg/' + afterFolder;
-    }
-
     // base64 dataURL → Blob（直传需要二进制体）
     function dataUrlToBlob(dataUrl){
         try {
@@ -3144,35 +3120,20 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
                     idbSet(IMAGE_CACHE_KEY, backupData.imageData).catch(() => {
                         console.warn('图片缓存写入 IndexedDB 失败，将仅在本次会话中保留');
                     });
-                    // 🆕 按绘本分组后再上传：一是让这些"备份里没有cosKey、只有内嵌
-                    // 图片数据"的页面，也按绘本名称存入对应的 COS 子文件夹（与新的
-                    // 存储规则保持一致）；二是顺带修掉一个潜在的匹配错位问题——
-                    // 之前是在整个库范围内按文件名找页面回填cosKey，如果两本不同的
-                    // 绘本刚好有页面重名（比如都叫 page1.jpg），会互相认错页面；
-                    // 现在按每本绘本自己的页面数组一一对应，不会再出现这种情况。
-                    const toUploadGroups = [];
-                    getAllStories(library).forEach(story => {
-                        const items = [];
-                        const pages = [];
-                        (story.pages || []).forEach(p => {
-                            if (!p.cosKey && p.file && backupData.imageData[p.file]) {
-                                items.push({ file: p.file, dataUrl: backupData.imageData[p.file] });
-                                pages.push(p);
+                    const allPages = getAllStories(library).flatMap(s => (s.pages || []));
+                    const toUpload = allPages
+                        .filter(p => !p.cosKey && p.file && backupData.imageData[p.file])
+                        .map(p => ({ file: p.file, dataUrl: backupData.imageData[p.file] }));
+                    if (toUpload.length > 0) {
+                        uploadPagesToCos(toUpload).then(results => {
+                            let changed = false;
+                            for (const r of results) {
+                                if (!r.cosKey) continue;
+                                const page = allPages.find(p => p.file === r.file);
+                                if (page && !page.cosKey) { page.cosKey = r.cosKey; changed = true; }
                             }
-                        });
-                        if (items.length) toUploadGroups.push({ title: story.title, items, pages });
-                    });
-                    if (toUploadGroups.length > 0) {
-                        let anyChanged = false;
-                        Promise.all(toUploadGroups.map(group =>
-                            uploadPagesToCos(group.items, group.title).then(results => {
-                                results.forEach((r, idx) => {
-                                    if (!r.cosKey) return;
-                                    const page = group.pages[idx]; // uploadPagesToCos 按输入顺序串行处理，与结果一一对应
-                                    if (page && !page.cosKey) { page.cosKey = r.cosKey; anyChanged = true; }
-                                });
-                            })
-                        )).then(() => { if (anyChanged) saveLibrary(); }).catch(() => {});
+                            if (changed) saveLibrary();
+                        }).catch(() => {});
                     }
                 }
 
@@ -4425,7 +4386,7 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
     /* =====================================================================
        Spread rendering
        ===================================================================== */
-    function buildPagePanel(page, globalIndex, storyTitle){
+    function buildPagePanel(page, globalIndex){
         const panel = document.createElement('div');
         panel.className = 'page-panel';
 
@@ -4512,19 +4473,6 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
         }
         img.alt = page.text || ('第 ' + (globalIndex+1) + ' 页');
         let imgRetried = false;
-        let imgAltTried = false;
-        img.addEventListener('load', ()=>{
-            // 🆕 如果这次是靠"兼容兜底路径"才加载成功的，说明记录的 cosKey 已经
-            // 过期（比如导入了改造前的历史备份，或绘本改名前的旧路径），
-            // 自动把 cosKey 校正成实际能用的路径并持久化，避免每次打开都要
-            // 重新走一遍兜底重试。
-            if (img.dataset.pendingAltKey) {
-                page.cosKey = img.dataset.pendingAltKey;
-                delete img.dataset.pendingAltKey;
-                renderTree();
-                saveLibrary();
-            }
-        });
         img.addEventListener('error', ()=>{
             // 网络地址先自动重试一次（可能是瞬时抖动），本地 file:// 地址重试没有意义，直接跳过
             const isRemote = imgDir.startsWith('http://') || imgDir.startsWith('https://');
@@ -4533,19 +4481,6 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
                 setTimeout(()=>{ img.src = imgSrc + (imgSrc.includes('?') ? '&' : '?') + '_retry=' + Date.now(); }, 500);
                 return;
             }
-            // 🆕 兼容旧数据：重试一次仍失败时，尝试"另一种可能的路径"（详见
-            // buildAlternateCosKey 说明），命中的话会在上面的 load 事件里自动
-            // 把 cosKey 纠正过来。
-            if (isRemote && page.cosKey && !imgAltTried) {
-                const altKey = buildAlternateCosKey(page.cosKey, storyTitle);
-                if (altKey && altKey !== page.cosKey) {
-                    imgAltTried = true;
-                    img.dataset.pendingAltKey = altKey;
-                    img.src = COS_BASE + altKey;
-                    return;
-                }
-            }
-            delete img.dataset.pendingAltKey;
             if(imgBox.querySelector('.missing-img')) return;
             const miss = document.createElement('div');
             miss.className = 'missing-img';
@@ -6050,8 +5985,8 @@ function hideWordCard() {
     const rightPage = story.pages[rightIdx] || null;
 
     spreadEl.innerHTML = '';
-    spreadEl.appendChild(buildPagePanel(leftPage, leftIdx, story.title));
-    spreadEl.appendChild(buildPagePanel(rightPage, rightIdx, story.title));
+    spreadEl.appendChild(buildPagePanel(leftPage, leftIdx));
+    spreadEl.appendChild(buildPagePanel(rightPage, rightIdx));
 
     storyCaption.textContent = story.title;
     const shownEnd = Math.min(rightIdx + 1, story.pages.length);

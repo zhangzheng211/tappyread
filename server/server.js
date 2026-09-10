@@ -61,6 +61,32 @@ function sanitizeFileName(name) {
   return base.replace(/[^\w.\-\u4e00-\u9fa5]/g, '_').slice(0, 120) || 'image';
 }
 
+/** 🆕 绘本名称 → COS 文件夹名清洗：不能用 split('/').pop()（那是给文件名用的，
+ *  遇到标题本身带斜杠会被截断丢字），而是把 / \ 等非法字符统一替换成下划线，
+ *  保留标题整体作为一个文件夹名。 */
+function sanitizeStoryFolderName(name) {
+  const raw = String(name || '').trim();
+  const safe = raw.replace(/[\\/]/g, '_').replace(/[^\w.\-\u4e00-\u9fa5]/g, '_').slice(0, 80);
+  return safe || 'untitled';
+}
+
+/** 🆕 判断 key 是否属于当前用户在 dir 目录下的对象。
+ *  兼容两种结构：
+ *    旧的扁平结构：  {dir}/u{userId}_...
+ *    新的分文件夹结构：{dir}/{绘本名称}/u{userId}_...（只允许恰好一层文件夹）
+ */
+function keyMatchesUserPrefix(key, dir, userId) {
+  const userToken = `u${userId}_`;
+  if (key.startsWith(`${dir}/${userToken}`)) return true;
+  const dirPrefix = `${dir}/`;
+  if (!key.startsWith(dirPrefix)) return false;
+  const rest = key.slice(dirPrefix.length);
+  const slashIdx = rest.indexOf('/');
+  if (slashIdx === -1) return false;
+  const afterFolder = rest.slice(slashIdx + 1);
+  return afterFolder.startsWith(userToken);
+}
+
 function sanitizeUsername(name) {
   return String(name || '').trim()
     .replace(/[^\w.\-\u4e00-\u9fa5]+/g, '_')
@@ -407,26 +433,38 @@ async function fillLoginLogDuration(username) {
 }
 
 /* =====================================================================
-   新注册用户默认绘本目录：从 COS 模板 jpeg/start.json 拉取一份默认绘本目录，
+   新注册用户默认绘本目录：从 COS 模板 json/start.json 拉取一份默认绘本目录，
    写入这个新用户自己的 json/{username}.json，保证新用户登录后自带该绘本。
    ===================================================================== */
-const START_TEMPLATE_URL = process.env.START_TEMPLATE_URL
-  || `https://${COS_BUCKET}.cos.${COS_REGION}.myqcloud.com/${COS_JSON_DIR}/start.json`;
 
-async function fetchStartTemplate() {
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5000);
-    const resp = await fetch(START_TEMPLATE_URL, { signal: controller.signal });
-    clearTimeout(timer);
-    if (!resp.ok) return null;
-    const data = await resp.json();
-    if (!data || !Array.isArray(data.tree)) return null;
-    return data;
-  } catch (error) {
-    console.warn('获取默认绘本模板 start.json 失败（不影响注册）:', error.message);
-    return null;
-  }
+// 🔧 修复：之前这里用不带身份认证的公网 fetch() 直接请求 json/start.json，
+// 而 json/ 目录跟 jpeg/ 不一样，项目里所有读取它的地方（比如上面读用户绘本库
+// 用的 cosClient.getObject）全部走的是带密钥认证的 COS SDK，说明这个目录
+// 大概率从没开过公有读权限——公网直接 fetch 大概率会被 COS 返回 403 拒绝
+// 访问，resp.ok 为 false，函数直接返回 null，表现为"注册成功但没有默认绘本"。
+// 现在改成跟读用户绘本库完全一样的方式：用带密钥认证的 COS SDK 直接读，
+// 不再依赖 json/ 目录的公有读设置，从根上排除这一类权限问题。
+function fetchStartTemplate() {
+  return new Promise((resolve) => {
+    if (!cosConfigured) return resolve(null);
+    const key = `${COS_JSON_DIR}/start.json`;
+    const timer = setTimeout(() => resolve(null), 8000);
+    cosClient.getObject({ Bucket: COS_BUCKET, Region: COS_REGION, Key: key }, (err, data) => {
+      clearTimeout(timer);
+      if (err) {
+        console.warn('获取默认绘本模板 start.json 失败（不影响注册）:', err.message);
+        return resolve(null);
+      }
+      try {
+        const parsed = JSON.parse(data.Body.toString('utf8'));
+        if (!parsed || !Array.isArray(parsed.tree)) return resolve(null);
+        resolve(parsed);
+      } catch (parseErr) {
+        console.warn('默认绘本模板 start.json 内容不是合法JSON（不影响注册）:', parseErr.message);
+        resolve(null);
+      }
+    });
+  });
 }
 
 /** 新用户注册成功后，初始化默认绘本目录（失败不影响注册本身） */
@@ -550,9 +588,11 @@ app.get('/api/cos/auth', authenticate, (req, res) => {
   if (!key) return res.status(400).json({ error: '缺少 key 参数' });
 
   const safeUsername = sanitizeUsername(req.user.username).replace(/_+$/g, '') || 'guest';
+  // 🆕 图片路径现在可能带"绘本名称文件夹"这一层（jpeg/{绘本名}/u{id}_...），
+  // 用 keyMatchesUserPrefix 同时兼容新旧两种结构
   const allowed =
-    key.startsWith(`${COS_IMG_DIR}/u${req.user.id}_`) ||
-    key.startsWith(`${COS_HTML_DIR}/u${req.user.id}_`) ||
+    keyMatchesUserPrefix(key, COS_IMG_DIR, req.user.id) ||
+    keyMatchesUserPrefix(key, COS_HTML_DIR, req.user.id) ||
     key === `${COS_JSON_DIR}/${safeUsername}.json`;
   if (!allowed) return res.status(403).json({ error: '无权访问该 COS 路径' });
 
@@ -640,7 +680,10 @@ app.post('/api/upload/image', authenticate, async (req, res) => {
     const buffer = Buffer.from(match[2], 'base64');
     if (!buffer.length) return res.status(400).json({ error: '图片内容为空' });
 
-    const key = `${COS_IMG_DIR}/u${req.user.id}_${Date.now()}_${sanitizeFileName(fileName)}`;
+    // 对象键带 u{userId}_ 前缀，实现用户间隔离；
+    // 🆕 新增"绘本名称文件夹"层级：传了 storyName 时，图片存到 jpeg/{绘本名}/ 子目录下
+    const storyFolder = req.body.storyName ? sanitizeStoryFolderName(req.body.storyName) + '/' : '';
+    const key = `${COS_IMG_DIR}/${storyFolder}u${req.user.id}_${Date.now()}_${sanitizeFileName(fileName)}`;
     await putCosObject(key, buffer);
     res.json({ ok: true, key, url: COS_BASE_URL + key });
   } catch (error) {
@@ -674,16 +717,15 @@ app.post('/api/images/delete', authenticate, async (req, res) => {
   if (!cosConfigured) return sendCosConfigError(res);
   try {
     const keys = Array.isArray(req.body.keys) ? req.body.keys : [];
-    const userPrefix = `u${req.user.id}_`;
+    // 仅允许删除当前用户上传的对象，防止越权删除。
+    // 🆕 图片路径现在可能带"绘本名称文件夹"这一层（jpeg/{绘本名}/u{id}_...），
+    // 用 keyMatchesUserPrefix 同时兼容新旧两种结构，否则按绘本名分文件夹后，
+    // 删除绘本时这里的前缀过滤会把新结构的 key 全部误判为"越权"而拒绝删除。
     // 单次最多接受 2000 个 key（覆盖绝大多数绘本的图片数量）；之前的 200 上限
     // 对页数较多的绘本明显不够，会导致删不干净、COS 里残留部分对象。
     const safeKeys = keys
       .map(k => String(k || '').trim())
-      .filter(k => {
-        const imgPrefix = `${COS_IMG_DIR}/${userPrefix}`;
-        const htmlPrefix = `${COS_HTML_DIR}/${userPrefix}`;
-        return k.startsWith(imgPrefix) || k.startsWith(htmlPrefix);
-      })
+      .filter(k => keyMatchesUserPrefix(k, COS_IMG_DIR, req.user.id) || keyMatchesUserPrefix(k, COS_HTML_DIR, req.user.id))
       .slice(0, 2000);
     if (!safeKeys.length) return res.json({ ok: true, deleted: 0, skipped: keys.length });
     await deleteCosObjects(safeKeys);

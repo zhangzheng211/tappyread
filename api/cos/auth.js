@@ -28,6 +28,23 @@ function sanitizeUsername(name) {
     .slice(0, 40) || 'guest';
 }
 
+/** 🆕 判断 key 是否属于当前用户在 dir 目录下的对象。
+ *  兼容两种结构：
+ *    旧的扁平结构：  {dir}/u{userId}_...
+ *    新的分文件夹结构：{dir}/{绘本名称}/u{userId}_...（只允许恰好一层文件夹）
+ */
+function keyMatchesUserPrefix(key, dir, userId) {
+  const userToken = `u${userId}_`;
+  if (key.startsWith(`${dir}/${userToken}`)) return true;
+  const dirPrefix = `${dir}/`;
+  if (!key.startsWith(dirPrefix)) return false;
+  const rest = key.slice(dirPrefix.length);
+  const slashIdx = rest.indexOf('/');
+  if (slashIdx === -1) return false;
+  const afterFolder = rest.slice(slashIdx + 1);
+  return afterFolder.startsWith(userToken);
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'GET') return sendJson(res, 405, { error: '请求方法不允许' });
   try {
@@ -40,10 +57,12 @@ export default async function handler(req, res) {
     if (!key) return sendJson(res, 400, { error: '缺少 key 参数' });
 
     // 仅允许当前用户自己的对象键：图片/HTML 前缀 + 本人目录 JSON，防越权
+    // 🆕 图片路径现在可能带"绘本名称文件夹"这一层（jpeg/{绘本名}/u{id}_...），
+    // 用 keyMatchesUserPrefix 同时兼容新旧两种结构
     const safeUsername = sanitizeUsername(user.username).replace(/_+$/g, '') || 'guest';
     const allowed =
-      key.startsWith(`${COS_IMG_DIR}/u${user.id}_`) ||
-      key.startsWith(`${COS_HTML_DIR}/u${user.id}_`) ||
+      keyMatchesUserPrefix(key, COS_IMG_DIR, user.id) ||
+      keyMatchesUserPrefix(key, COS_HTML_DIR, user.id) ||
       key === `${COS_JSON_DIR}/${safeUsername}.json`;
     if (!allowed) return sendJson(res, 403, { error: '无权访问该 COS 路径' });
 
