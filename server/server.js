@@ -516,7 +516,7 @@ app.post('/api/auth/register', async (req, res) => {
     );
     const token = await issueSession(result.insertId, res);
 
-    // 新用户初始化默认绘本目录（从 COS 模板 json/start.json 拉取），失败不影响注册本身
+    // 新用户初始化默认绘本目录（从 COS 模板 jpeg/start.json 拉取），失败不影响注册本身
     await initDefaultLibraryForNewUser(username);
     // 注册日志：不阻塞响应，失败也不影响注册本身
     writeLoginLog(username, 'register', req);
