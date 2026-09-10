@@ -18,7 +18,7 @@ function hashToken(token) { return crypto.createHash('sha256').update(token).dig
 function sendJson(res, status, body) { res.status(status).json(body); }
 
 /* =====================================================================
-   新注册用户默认绘本目录：从 COS 模板 jpeg/start.json 拉取一份默认绘本，
+   新注册用户默认绘本目录：从 COS 模板 json/start.json 拉取一份默认绘本，
    写入这个新用户自己的 json/{username}.json，保证新用户登录后自带该绘本。
    ===================================================================== */
 const COS_BUCKET = process.env.COS_BUCKET || 'tappyreadjpeg-1325106148';
