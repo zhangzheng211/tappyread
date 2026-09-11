@@ -5,6 +5,7 @@ const COS_REGION = process.env.COS_REGION || 'ap-guangzhou';
 const COS_IMG_DIR = (process.env.COS_IMG_DIR || 'jpeg').replace(/\/+$/, '');
 const COS_HTML_DIR = (process.env.COS_HTML_DIR || 'html').replace(/\/+$/, '');
 const COS_JSON_DIR = (process.env.COS_JSON_DIR || 'json').replace(/\/+$/, '');
+const COS_TEMPLATE_KEY = process.env.COS_TEMPLATE_KEY || `${COS_JSON_DIR}/start.json`;
 const cosConfigured = Boolean(process.env.COS_SECRET_ID && process.env.COS_SECRET_KEY);
 
 function sendJson(res, status, body) {
@@ -31,6 +32,7 @@ export default async function handler(req, res) {
       userId: user.id,
       username: user.username,
       jsonKey: `${COS_JSON_DIR}/${safeUsername}.json`,
+      templateKey: COS_TEMPLATE_KEY,
       imgDir: COS_IMG_DIR,
       htmlDir: COS_HTML_DIR
     });

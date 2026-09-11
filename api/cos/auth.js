@@ -6,6 +6,7 @@ const COS_REGION = process.env.COS_REGION || 'ap-guangzhou';
 const COS_IMG_DIR = (process.env.COS_IMG_DIR || 'jpeg').replace(/\/+$/, '');
 const COS_HTML_DIR = (process.env.COS_HTML_DIR || 'html').replace(/\/+$/, '');
 const COS_JSON_DIR = (process.env.COS_JSON_DIR || 'json').replace(/\/+$/, '');
+const COS_TEMPLATE_KEY = process.env.COS_TEMPLATE_KEY || `${COS_JSON_DIR}/start.json`;
 const cosConfigured = Boolean(process.env.COS_SECRET_ID && process.env.COS_SECRET_KEY);
 const cosClient = cosConfigured
   ? new COS({ SecretId: process.env.COS_SECRET_ID, SecretKey: process.env.COS_SECRET_KEY })
@@ -60,10 +61,12 @@ export default async function handler(req, res) {
     // 🆕 图片路径现在可能带"绘本名称文件夹"这一层（jpeg/{绘本名}/u{id}_...），
     // 用 keyMatchesUserPrefix 同时兼容新旧两种结构
     const safeUsername = sanitizeUsername(user.username).replace(/_+$/g, '') || 'guest';
+    const isTemplateRead = key === COS_TEMPLATE_KEY && (method === 'GET' || method === 'HEAD');
     const allowed =
       keyMatchesUserPrefix(key, COS_IMG_DIR, user.id) ||
       keyMatchesUserPrefix(key, COS_HTML_DIR, user.id) ||
-      key === `${COS_JSON_DIR}/${safeUsername}.json`;
+      key === `${COS_JSON_DIR}/${safeUsername}.json` ||
+      isTemplateRead;
     if (!allowed) return sendJson(res, 403, { error: '无权访问该 COS 路径' });
 
     let query;

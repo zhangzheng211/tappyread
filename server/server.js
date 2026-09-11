@@ -42,6 +42,7 @@ const COS_REGION = process.env.COS_REGION || 'ap-guangzhou';
 const COS_IMG_DIR = (process.env.COS_IMG_DIR || 'jpeg').replace(/\/+$/, '');
 const COS_HTML_DIR = (process.env.COS_HTML_DIR || 'html').replace(/\/+$/, '');
 const COS_JSON_DIR = (process.env.COS_JSON_DIR || 'json').replace(/\/+$/, '');
+const COS_TEMPLATE_KEY = process.env.COS_TEMPLATE_KEY || `${COS_JSON_DIR}/start.json`;
 const COS_BASE_URL = `https://${COS_BUCKET}.cos.${COS_REGION}.myqcloud.com/`;
 
 const cosConfigured = Boolean(process.env.COS_SECRET_ID && process.env.COS_SECRET_KEY);
@@ -433,43 +434,8 @@ async function fillLoginLogDuration(username) {
 }
 
 /* =====================================================================
-   新注册用户默认绘本目录：从 COS 模板 json/start.json 拉取一份默认绘本目录，
-   写入这个新用户自己的 json/{username}.json，保证新用户登录后自带该绘本。
+   新用户默认绘本目录改为前端直连 COS：注册接口不再等待 start.json 下载/写回。
    ===================================================================== */
-const START_TEMPLATE_URL = process.env.START_TEMPLATE_URL
-  || `https://${COS_BUCKET}.cos.${COS_REGION}.myqcloud.com/${COS_JSON_DIR}/start.json`;
-
-async function fetchStartTemplate() {
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5000);
-    const resp = await fetch(START_TEMPLATE_URL, { signal: controller.signal });
-    clearTimeout(timer);
-    if (!resp.ok) return null;
-    const data = await resp.json();
-    if (!data || !Array.isArray(data.tree)) return null;
-    return data;
-  } catch (error) {
-    console.warn('获取默认绘本模板 start.json 失败（不影响注册）:', error.message);
-    return null;
-  }
-}
-
-/** 新用户注册成功后，初始化默认绘本目录（失败不影响注册本身） */
-async function initDefaultLibraryForNewUser(username) {
-  try {
-    const template = await fetchStartTemplate();
-    if (!template) return;
-    await syncLibraryToCos(username, {
-      tree: template.tree,
-      collapsed: Array.isArray(template.collapsed) ? template.collapsed : [],
-      selectedFolderId: template.selectedFolderId || null,
-      currentStoryId: template.currentStoryId || null
-    });
-  } catch (error) {
-    console.warn('初始化新用户默认绘本目录失败（不影响注册）:', error.message);
-  }
-}
 
 app.post('/api/auth/login', async (req, res) => {
   try {
@@ -516,9 +482,8 @@ app.post('/api/auth/register', async (req, res) => {
     );
     const token = await issueSession(result.insertId, res);
 
-    // 新用户初始化默认绘本目录（从 COS 模板 jpeg/start.json 拉取），失败不影响注册本身
-    await initDefaultLibraryForNewUser(username);
-    // 注册日志：不阻塞响应，失败也不影响注册本身
+    // 注册成功立即返回。默认 start.json 由前端登录后直接从 COS 初始化。
+    // 注册日志后台写入，不阻塞注册响应。
     writeLoginLog(username, 'register', req);
 
     res.status(201).json({ token, userId: result.insertId, username });
@@ -563,6 +528,7 @@ app.get('/api/cos/config', authenticate, (req, res) => {
     userId: req.user.id,
     username: req.user.username,
     jsonKey: `${COS_JSON_DIR}/${safeUsername}.json`,
+    templateKey: COS_TEMPLATE_KEY,
     imgDir: COS_IMG_DIR,
     htmlDir: COS_HTML_DIR
   });
@@ -578,10 +544,12 @@ app.get('/api/cos/auth', authenticate, (req, res) => {
   const safeUsername = sanitizeUsername(req.user.username).replace(/_+$/g, '') || 'guest';
   // 🆕 图片路径现在可能带"绘本名称文件夹"这一层（jpeg/{绘本名}/u{id}_...），
   // 用 keyMatchesUserPrefix 同时兼容新旧两种结构
+  const isTemplateRead = key === COS_TEMPLATE_KEY && (method === 'GET' || method === 'HEAD');
   const allowed =
     keyMatchesUserPrefix(key, COS_IMG_DIR, req.user.id) ||
     keyMatchesUserPrefix(key, COS_HTML_DIR, req.user.id) ||
-    key === `${COS_JSON_DIR}/${safeUsername}.json`;
+    key === `${COS_JSON_DIR}/${safeUsername}.json` ||
+    isTemplateRead;
   if (!allowed) return res.status(403).json({ error: '无权访问该 COS 路径' });
 
   let query;

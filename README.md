@@ -1,7 +1,29 @@
 # tappyread — 点读绘本阅读器（前端直传 COS 版）
 基于 Node.js + Express + MySQL（TiDB Cloud）的绘本阅读应用，支持账号注册/登录、绘本目录云端同步（COS JSON）、图片/HTML 前端直传腾讯云 COS、HTML 绘本双击全屏点读。
 
-## 一、本次优化：三个上传问题的根因与终极方案
+## 一、本次优化：注册默认绘本超时 + Chrome 朗读异常
+
+### 1. 新用户默认绘本改为“浏览器直读 COS”
+
+注册接口现在只完成 MySQL 用户、Session 和后台日志写入，不再等待 `json/start.json` 下载和复制。新用户进入阅读器后：
+
+1. 浏览器通过轻量 `/api/cos/config` 获取当前用户的 COS 对象键和 `json/start.json` 模板键；
+2. 浏览器通过 `/api/cos/auth` 获取短期签名；
+3. `json/{用户名}.json` 与 `json/start.json` 的 JSON 文件体直接在“浏览器 ↔ COS”之间传输，不经过 Vercel；
+4. 用户目录不存在时才读取 `json/start.json`，首屏立即使用模板；随后异步写入自己的用户目录，不阻塞阅读器；
+5. 已有用户网络异常时优先保留 IndexedDB 缓存，不会把现有绘本误判成空目录。
+
+因此，截图中 `/api/auth/register` 因等待 COS 导致的约 8 秒请求链路被彻底移除。
+
+### 2. Chrome 朗读稳定性
+
+- 删除每 6 秒强制 `pause()/resume()` 的“续命”定时器，避免它反过来打断正常朗读；
+- `cancel()` 后增加短暂间隔再 `speak()`；
+- 单句朗读增加 4.5 秒启动看门狗，静默失败自动重试 1 次；
+- 跨页连续朗读同样增加看门狗和重试，不会因某一句没有触发 `onend` 而永久卡死；
+- 标签页重新恢复可见时只执行 `resume()`；
+- HTML 点读页内置脚本同步采用同样策略。
+
 
 ## 二、技术架构
 
@@ -66,6 +88,7 @@ Express 服务 (server/server.js) 或 Vercel 云函数 (api/*)
    | `COS_SECRET_ID` / `COS_SECRET_KEY` | **腾讯云 API 密钥**（控制台 → 访问管理 → API 密钥管理）。**必填**，否则直传与中转上传都不可用 |
    | `COS_BUCKET` / `COS_REGION` | 默认 `tappyreadjpeg-1325106148` / `ap-guangzhou` |
    | `COS_IMG_DIR` / `COS_HTML_DIR` / `COS_JSON_DIR` | 默认 `jpeg` / `html` / `json` |
+   | `COS_TEMPLATE_KEY` | 默认 `json/start.json`，新用户默认绘本模板 |
 
 3. 按「二」配置 COS CORS。
    图片绘本存储地址：https://tappyreadjpeg-1325106148.cos.ap-guangzhou.myqcloud.com/jpeg/
@@ -86,7 +109,7 @@ Express 服务 (server/server.js) 或 Vercel 云函数 (api/*)
 
 ## 七、使用流程
 
-1. **注册/登录** → 自动进入阅读器，新注册的用户默认加载cos上json目录下的start.json绘本目录，并记录loginlog表日志。
+1. **注册/登录** → 注册接口立即返回；新用户进入阅读器后由浏览器直读 COS `json/start.json` 作为默认绘本，并异步初始化自己的 `json/{用户名}.json`，同时记录 loginlog。
 2. **导入目录**：「📥 导入」选择备份 JSON；含 Base64 图片的备份自动补传 COS。
 3. **批量导入绘本 / 新增绘本 / 添加页面**：确认导入后图片**直传** COS `jpeg/`，进度条显示进度。
 4. **一键生成**：选择 HTML 文件 → 分析（整文件直传 COS `html/` 1 次，本地分页裁剪）→ 确认生成（裁剪页内联进目录，**不逐页上传**，与历史逻辑一致）。(暂时隐藏了html绘本导入的“添加HTML绘本”按钮，该功能暂时不开放！)

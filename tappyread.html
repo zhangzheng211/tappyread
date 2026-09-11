@@ -2272,11 +2272,28 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
         if(COS_DIRECT.client) return COS_DIRECT.client;
         if(typeof COS === 'undefined' || !COS) { COS_DIRECT.unavailable = true; return null; }
         try {
-            const res = await fetch(API_BASE + '/cos/config', {
-                headers: { Authorization: 'Bearer ' + __authToken },
-                credentials: 'include'
-            });
-            if(!res.ok){ COS_DIRECT.unavailable = true; return null; }
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 5000);
+            let res;
+            try {
+                res = await fetch(API_BASE + '/cos/config', {
+                    headers: { Authorization: 'Bearer ' + __authToken },
+                    credentials: 'include',
+                    signal: controller.signal
+                });
+            } finally {
+                clearTimeout(timeoutId);
+            }
+            if(!res.ok){
+                // 401/5xx/网络超时都属于临时失败，不把 unavailable 永久置死，
+                // 这样用户点击“重试”时可以重新建立 COS 直连。
+                if(res.status === 401) {
+                    localStorage.removeItem(AUTH_TOKEN_KEY);
+                    localStorage.removeItem(USER_ID_KEY);
+                    location.replace('index.html');
+                }
+                return null;
+            }
             const cfg = await res.json();
             if(!cfg || !cfg.enabled || !cfg.bucket || !cfg.region){
                 COS_DIRECT.unavailable = true;
@@ -2293,22 +2310,26 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
                         if(options.Query && Object.keys(options.Query).length) qs.set('query', JSON.stringify(options.Query));
                         if(options.Headers && Object.keys(options.Headers).length) qs.set('headers', JSON.stringify(options.Headers));
                     } catch(e) {}
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 5000);
                     fetch(API_BASE + '/cos/auth?' + qs.toString(), {
                         headers: { Authorization: 'Bearer ' + __authToken },
-                        credentials: 'include'
+                        credentials: 'include',
+                        signal: controller.signal
                     })
                         .then(r => r.ok ? r.json() : Promise.reject(new Error('签名接口 ' + r.status)))
                         .then(d => {
                             if(d && d.Authorization) callback({ Authorization: d.Authorization });
                             else callback({ error: '签名响应缺少 Authorization' });
                         })
-                        .catch(err => callback({ error: (err && err.message) || '签名获取失败' }));
+                        .catch(err => callback({ error: (err && err.message) || '签名获取失败' }))
+                        .finally(() => clearTimeout(timeoutId));
                 }
             });
             return COS_DIRECT.client;
         } catch(e) {
-            console.warn('COS 直传客户端初始化失败，回退后端中转：', e);
-            COS_DIRECT.unavailable = true;
+            console.warn('COS 直连客户端初始化失败，本次稍后可重试：', e);
+            // 网络抖动/AbortError 不等于 COS 不支持，不永久禁用直连。
             return null;
         }
     }
@@ -2685,20 +2706,21 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
         loadRemoteLibrary();
     });
 
+    function isCosNotFoundError(error){
+        const code = String(error?.code || '').toLowerCase();
+        const status = Number(error?.statusCode || error?.status || 0);
+        return status === 404 || code === 'nosuchkey' || code === 'notfound' || code === 'no_such_key';
+    }
+
     async function loadRemoteLibrary()
     {
     const token = localStorage.getItem(AUTH_TOKEN_KEY);
     if(!token){
         location.replace('index.html');
         return;
-            }
+    }
 
-    // ===== 优化点：先用 IndexedDB 里的本地缓存"秒开"，网络数据到达后再静默校正 =====
-    // 以前每次打开页面都是"整屏转圈等网络返回"，哪怕上一次已经看过这个绘本目录。
-    // 现在先尝试从 IndexedDB 读一份最近一次保存的缓存，如果有就立刻渲染出来（几乎
-    // 是瞬间完成，不需要等网络），用户可以马上开始浏览/点读；紧接着仍然照常去 COS/
-    // 服务器拉取最新数据，拉到之后如果有变化再悄悄刷新一次即可，不会展示过期数据，
-    // 也不会因为网络失败就把已经看到的内容清空。
+    // 先从 IndexedDB 秒开；网络只负责静默校正，不再让首屏依赖 Vercel /api/library。
     let paintedFromCache = false;
     try {
         const cached = await idbGet(LS_LIB_KEY);
@@ -2712,66 +2734,49 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
             renderAll(false);
             paintedFromCache = true;
         }
-    } catch(e) { /* 缓存读取失败不影响后续正常的网络加载流程 */ }
+    } catch(e) { /* 缓存失败不影响 COS 直读 */ }
 
-    // 只有在没有缓存可以先展示的时候，才显示"加载中"转圈提示；
-    // 已经用缓存秒开的情况下，网络请求在后台默默进行即可，不打断用户
     if(!paintedFromCache) showTreeLoading(true);
 
     try{
-        // 优先：从 COS 直读目录 JSON（签名 GET）。6MB+ 的大目录不再经后端/Vercel 中转，
-        // 彻底绕开 Serverless 请求/响应体积限制，加载速度也更快（浏览器到 COS 直连）。
-        let data = null;
         const directClient = await getCosDirectClient().catch(() => null);
-        if(directClient && COS_DIRECT.config && COS_DIRECT.config.jsonKey){
-            try {
-                const text = await cosGetDirectText(COS_DIRECT.config.jsonKey);
-                if(text){
-                    const parsed = JSON.parse(text);
-                    if(parsed && Array.isArray(parsed.tree)) data = parsed;
+        if(!directClient || !COS_DIRECT.config || !COS_DIRECT.config.jsonKey){
+            throw new Error('COS 直读客户端不可用');
+        }
+
+        let data = null;
+        let loadedFromTemplate = false;
+
+        // 第一优先级：当前用户自己的 json/{username}.json。
+        // 只有明确得到 404，才允许使用公共 start.json 模板，避免网络抖动时把已有用户
+        // 的云端数据误判成不存在并覆盖掉。
+        try {
+            const text = await cosGetDirectText(COS_DIRECT.config.jsonKey);
+            if(text){
+                const parsed = JSON.parse(text);
+                if(parsed && Array.isArray(parsed.tree)) data = parsed;
+            }
+        } catch(userFileError) {
+            if(!isCosNotFoundError(userFileError)) throw userFileError;
+        }
+
+        // 新用户没有自己的目录文件时：浏览器直接从 COS 读取 json/start.json。
+        // 注册接口不再下载/复制 start.json，彻底移除“注册等待 COS”的超时链路。
+        if(!data && COS_DIRECT.config.templateKey){
+            const text = await cosGetDirectText(COS_DIRECT.config.templateKey);
+            if(text){
+                const parsed = JSON.parse(text);
+                if(parsed && Array.isArray(parsed.tree)){
+                    data = parsed;
+                    loadedFromTemplate = true;
                 }
-            } catch(e) {
-                // 404 = 该用户在 COS 上还没有目录文件（新用户），走后端兼容旧版命名加载；
-                // 其他错误（网络等）同样降级到后端通道，保证加载永远有兜底。
-                console.warn('COS 直读目录失败，改走后端加载：', e);
             }
         }
 
         if(!data){
-            // 前端超时兜底：原生 fetch 没有默认超时，网络异常/服务端很慢时会一直挂着，
-            // "绘本目录加载中……"就会永远显示。这里用 AbortController 设置 12 秒超时，
-            // 超时后主动放弃这次请求，给用户一个"加载超时，点击重试"的提示，而不是无限等待。
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 12000);
-            try {
-                const response = await fetch(`${API_BASE}/library`, {
-                    headers: { Authorization: `Bearer ${token}` },
-                    credentials: 'include',
-                    signal: controller.signal
-                });
-                clearTimeout(timeoutId);
-                if(response.status === 401){
-                    localStorage.removeItem(AUTH_TOKEN_KEY);
-                    localStorage.removeItem(USER_ID_KEY);
-                    localStorage.removeItem('tappyread_last_user');
-                    location.replace('index.html');
-                    return;
-                }
-                if(!response.ok) throw new Error(`目录加载失败: ${response.status}`);
-                const serverData = await response.json();
-                data = {
-                    tree: serverData.tree,
-                    collapsed: serverData.collapsed,
-                    selectedFolderId: serverData.selectedFolderId,
-                    currentStoryId: serverData.currentStoryId
-                };
-            } catch(relayError) {
-                clearTimeout(timeoutId);
-                throw relayError;
-            }
+            throw new Error('COS 用户目录为空');
         }
 
-        // 直接使用服务器数据
         if(Array.isArray(data.tree) && data.tree.length > 0){
             library = data.tree;
             collapsedNodes = new Set(Array.isArray(data.collapsed) ? data.collapsed : []);
@@ -2783,8 +2788,8 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
             selectedFolderId = null;
             currentStoryId = null;
         }
-        
-        // 同步到本地缓存（IndexedDB，不再受 localStorage 容量限制）
+
+        // 云端数据落本地缓存，后续打开页面无需等待网络。
         try {
             await idbSet(LS_LIB_KEY, {
                 tree: compactLibraryForLocalStorage(library),
@@ -2794,40 +2799,31 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
             });
             if(selectedFolderId) localStorage.setItem(LS_FOLDER_KEY, selectedFolderId);
             else localStorage.removeItem(LS_FOLDER_KEY);
-            if(currentStoryId) localStorage.setItem(CURRENT_STORY_KEY, currentStoryId);
-            else localStorage.removeItem(CURRENT_STORY_KEY);
             localStorage.setItem(LS_COLLAPSED_KEY, JSON.stringify([...collapsedNodes]));
         } catch(e) {}
-        
-        // 默认选中第一个文件夹
+
         if (!selectedFolderId && library.length > 0) {
             const rootFolder = library.find(node => node && node.type === 'folder');
-            if (rootFolder) {
-                selectedFolderId = rootFolder.id;
-            }
+            if (rootFolder) selectedFolderId = rootFolder.id;
         }
-        
-        // 隐藏加载状态，用最新数据刷新一次（如果之前已经用缓存秒开过，这里只是
-        // 悄悄用最新数据覆盖，绝大多数情况下内容没有变化，用户不会感知到重新渲染）
+
         showTreeLoading(false);
         renderTree();
         renderAll(false);
+
+        // 新用户模板只作为首屏数据；马上异步写入自己的 json/{username}.json。
+        // 不 await，不阻塞首屏，也不影响阅读器可用性。
+        if(loadedFromTemplate){
+            saveLibrary().catch(error => console.warn('初始化用户绘本目录异步保存失败：', error));
+        }
     }catch(error){
-        console.error('加载绘本目录失败，请检查网络', error);
-        if(error && error.name === 'AbortError'){
-            // 超时：保留"加载中"提示，额外露出"重试"按钮，不要清空成空状态，
-            // 避免网络只是暂时慢一点就把用户已导入的目录"误判"成没有数据
-            if(!paintedFromCache) showTreeLoadingTimedOut();
-            return;
-        }
+        console.error('加载绘本目录失败，请检查 COS 网络/CORS 配置', error);
         if(paintedFromCache){
-            // 已经用本地缓存展示过内容了：网络这次失败，保留现状不清空，
-            // 只在控制台提示一下，避免把用户正在看的绘本目录突然清没
             showTreeLoading(false);
-            console.warn('⚠️ 本次未能连接服务器同步最新数据，当前显示的是本地缓存内容');
+            console.warn('⚠️ COS 本次同步失败，继续使用本地缓存，不清空当前绘本目录');
             return;
         }
-        // 既没有本地缓存、网络又失败：显示空状态
+        showTreeLoadingTimedOut();
         library = [];
         collapsedNodes = new Set();
         selectedFolderId = null;
@@ -2835,8 +2831,7 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
         showTreeLoading(false);
         renderTree();
         renderAll(false);
-        console.warn('⚠️ 无法连接服务器，请刷新重试');
-        }
+    }
     }
     // loadRemoteLibrary();
 
@@ -3593,12 +3588,15 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
        ===================================================================== */
     let voices = [];
     let speechSessionId = 0;
+    let isSpeaking = false;
+    let currentUtterance = null;
+    let currentIndicatorEl = null;
 
     function loadVoices(){
         if(!('speechSynthesis' in window)) return;
         voices = speechSynthesis.getVoices();
         const rank = v => {
-            const n = (v.name+v.lang).toLowerCase();
+            const n = (v.name + v.lang).toLowerCase();
             let score = 0;
             if(v.lang && v.lang.toLowerCase().startsWith('en')) score += 10;
             if(n.includes('male')) score += 5;
@@ -3606,9 +3604,9 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
             if(n.includes('female')) score -= 3;
             return score;
         };
-        const sorted = voices.slice().sort((a,b)=> rank(b)-rank(a));
+        const sorted = voices.slice().sort((a,b) => rank(b) - rank(a));
         voiceSelect.innerHTML = '';
-        sorted.forEach(v=>{
+        sorted.forEach(v => {
             const opt = document.createElement('option');
             opt.value = v.name;
             opt.textContent = `${v.name} (${v.lang})`;
@@ -3618,155 +3616,125 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
     }
     if('speechSynthesis' in window){
         loadVoices();
-        speechSynthesis.onvoiceschanged = loadVoices;
+        speechSynthesis.addEventListener?.('voiceschanged', loadVoices);
     }
 
     function makeUtterance(text){
-        const utter = new SpeechSynthesisUtterance(text);
-        const chosen = voices.find(v=>v.name === voiceSelect.value);
+        const utter = new SpeechSynthesisUtterance(String(text || ''));
+        const chosen = voices.find(v => v.name === voiceSelect.value);
         if(chosen) utter.voice = chosen;
-        utter.rate = parseFloat(rateRange.value);
+        utter.rate = parseFloat(rateRange.value) || 0.8;
         utter.pitch = 0.92;
         return utter;
     }
 
-    // 语音朗读（支持点击切换播放/停止）
-    let isSpeaking = false;
-    let currentUtterance = null;
-    let currentIndicatorEl = null;
+    // Chrome 的 speechSynthesis 偶发会在 cancel/speak 连续调用、后台切换或系统休眠后
+    // 卡在 speaking/paused 状态。关键修复：不再每 6 秒强制 pause/resume（这会反过来
+    // 干扰正常朗读），而是只在“准备开始”和“页面重新可见”时 resume，并用看门狗检测
+    // 完全没有事件回调的静默失败。
+    const SPEECH_PRE_SPEAK_DELAY = 80;
+    const SPEECH_START_TIMEOUT = 4500;
+    const SPEECH_MAX_RETRIES = 1;
 
-    // ---------------------------------------------------------------------
-    // 已知问题排查（偶发朗读不可用）：
-    // 部分浏览器（尤其是 Chrome 系）的 speechSynthesis 引擎在页面使用较长时间、
-    // 或者朗读次数较多之后，会偶发进入"卡死"状态——调用 speak() 既不出声，也不
-    // 触发 onstart / onend / onerror 中的任何一个事件；同时浏览器标签切到后台
-    // 再切回来，或系统休眠唤醒后，引擎也可能停留在 paused 状态、后续 speak()
-    // 永远不出声。之前的实现里，只有单页朗读 speakOne 有一个"看门狗"定时器兜底，
-    // 而绘本/整页自动朗读用的 speakSequence 完全没有类似保护——一旦某一句在
-    // 引擎卡死状态下被吞掉，onend 就永远不会触发，next() 也就永远不会被调用，
-    // 表现为"点了绘本却听不到声音，之后点绘本页也没反应"，且不会自行恢复。
-    // 这里做了三层修复：
-    //   1) speakSequence 补上与 speakOne 一致的"看门狗 + 自动跳到下一句"，
-    //      不会再被单句的静默失败卡住整段朗读；
-    //   2) speakOne 在看门狗超时后不再只是放弃，而是自动 cancel() 后重试一次，
-    //      避免"引擎瞬时卡顿"被误判为彻底失败；
-    //   3) 增加一个低频后台定时器，持续探测并纠正"卡在 paused"或"超过15秒
-    //      被引擎自动静音"这两种已知的浏览器行为，且在标签页重新可见时主动
-    //      resume()，从根源上减少"用了一段时间就不出声"的概率。
-    // ---------------------------------------------------------------------
+    function clearSpeechIndicator(el){
+        if(el) el.classList.remove('speaking');
+    }
 
-    const SPEECH_START_TIMEOUT = 1500;   // 等待 onstart 触发的时间，超时视为疑似卡死
-    const SPEECH_PRE_SPEAK_DELAY = 30;   // cancel() 之后到 speak() 之前的缓冲，避免
-                                          // "cancel 后立刻 speak"在部分浏览器上被直接丢弃
-
-    function stopSpeechSoft() {
+    function stopSpeechSoft(){
         isSpeaking = false;
         currentUtterance = null;
         currentIndicatorEl = null;
-        if ('speechSynthesis' in window) {
-            try { speechSynthesis.cancel(); } catch (error) { /* noop */ }
-            try { if (typeof speechSynthesis.resume === 'function') speechSynthesis.resume(); } catch (error) { /* noop */ }
+        if('speechSynthesis' in window){
+            try { speechSynthesis.cancel(); } catch(error) {}
+            try { speechSynthesis.resume(); } catch(error) {}
         }
     }
 
-    // 后台"续命"定时器：不影响正常朗读，只在引擎出现已知的异常状态时纠正它。
-    if ('speechSynthesis' in window) {
-        setInterval(() => {
-            try {
-                if (speechSynthesis.speaking) {
-                    // 部分浏览器朗读超过约15秒会被引擎自动静音，需要 pause/resume 才能续上
-                    speechSynthesis.pause();
-                    speechSynthesis.resume();
-                } else if (speechSynthesis.paused) {
-                    // 标签页切到后台、系统休眠等场景下，引擎可能停留在 paused 状态不再恢复
-                    speechSynthesis.resume();
-                }
-            } catch (error) { /* noop */ }
-        }, 6000);
-
+    if('speechSynthesis' in window){
         document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'visible') {
-                try { speechSynthesis.resume(); } catch (error) { /* noop */ }
+            if(document.visibilityState === 'visible'){
+                try { speechSynthesis.resume(); } catch(error) {}
             }
         });
     }
 
-    function speakOne(text, indicatorEl, _isRetry) {
-        if (!('speechSynthesis' in window) || !text) return;
+    function speakOne(text, indicatorEl, retryCount = 0) {
+        if(!('speechSynthesis' in window) || !String(text || '').trim()) return;
 
-        // 之前的 bug：只要"当前还有内容在朗读"（isSpeaking 为 true），不管这次点的
-        // 是不是同一个目标，一律直接停掉、什么都不读就 return。这导致用户连续点击
-        // 不同的绘本/不同页时，经常"点了却没声音"，必须再点一次才有反应。
-        // 现在改成：只有"再次点击同一个正在朗读的目标"（同一个 🔊 图标/同一页）
-        // 才当作"再点一次 = 停止"；点击不同目标、或者没有传 indicatorEl（比如
-        // 点整块绘本页正文），一律先停掉上一次朗读、立刻朗读这次点的新内容。
-        if (!_isRetry && isSpeaking && indicatorEl && currentIndicatorEl === indicatorEl) {
+        // 再点同一个正在朗读的按钮 = 停止；点其他内容 = 切换到新内容。
+        if(retryCount === 0 && isSpeaking && indicatorEl && currentIndicatorEl === indicatorEl){
+            ++speechSessionId;
             stopSpeechSoft();
-            indicatorEl.classList.remove('speaking');
+            clearSpeechIndicator(indicatorEl);
             return;
         }
 
         const token = ++speechSessionId;
         stopSpeechSoft();
+        clearSpeechIndicator(indicatorEl);
 
-        // 给 cancel() 留出生效时间，再真正调用 speak()，避免同一时刻的
-        // cancel + speak 在引擎里互相打架导致本次朗读被直接丢弃。
         setTimeout(() => {
-            if (token !== speechSessionId) return;
+            if(token !== speechSessionId) return;
+            try { speechSynthesis.resume(); } catch(error) {}
 
             const utter = makeUtterance(text);
             currentUtterance = utter;
             currentIndicatorEl = indicatorEl || null;
             isSpeaking = true;
             let started = false;
+            let settled = false;
 
-            // 看门狗：短时间内如果既没触发 onstart 也没触发 onerror，说明这次朗读大概率
-            // 静默失败了（部分浏览器偶发问题）。第一次遇到时不直接放弃，而是主动
-            // cancel() 后自动重试一次；仍然失败才彻底复位状态，避免 isSpeaking
-            // 卡死在 true，导致之后每一次点击都被上面"同一目标"的判断误拦下。
-            const watchdog = setTimeout(() => {
-                if (token !== speechSessionId) return;
-                if (!started && !_isRetry) {
-                    try { speechSynthesis.cancel(); } catch (error) { /* noop */ }
-                    isSpeaking = false;
-                    currentUtterance = null;
-                    currentIndicatorEl = null;
-                    speakOne(text, indicatorEl, true);
-                    return;
-                }
+            const finish = () => {
+                if(settled) return;
+                settled = true;
+                clearTimeout(watchdog);
+                if(token !== speechSessionId) return;
                 isSpeaking = false;
                 currentUtterance = null;
                 currentIndicatorEl = null;
-                if (indicatorEl) indicatorEl.classList.remove('speaking');
+                clearSpeechIndicator(indicatorEl);
+            };
+
+            const retry = () => {
+                if(settled) return;
+                settled = true;
+                clearTimeout(watchdog);
+                if(token !== speechSessionId) return;
+                isSpeaking = false;
+                currentUtterance = null;
+                clearSpeechIndicator(indicatorEl);
+                try { speechSynthesis.cancel(); } catch(error) {}
+                if(retryCount < SPEECH_MAX_RETRIES){
+                    setTimeout(() => speakOne(text, indicatorEl, retryCount + 1), 120);
+                }
+            };
+
+            const watchdog = setTimeout(() => {
+                if(token !== speechSessionId || settled) return;
+                // 只有“从未收到 onstart”才自动重试；正常长句不受影响。
+                if(!started) retry();
+                else finish();
             }, SPEECH_START_TIMEOUT);
 
-            const finalize = function() {
-                clearTimeout(watchdog);
-                if (token !== speechSessionId) return;
-                isSpeaking = false;
-                currentUtterance = null;
-                currentIndicatorEl = null;
-                if (indicatorEl) indicatorEl.classList.remove('speaking');
-            };
-
-            utter.onstart = function() {
+            utter.onstart = () => {
+                if(token !== speechSessionId) return;
                 started = true;
                 clearTimeout(watchdog);
-                if (token === speechSessionId && indicatorEl) {
-                    indicatorEl.classList.add('speaking');
-                }
+                if(indicatorEl) indicatorEl.classList.add('speaking');
             };
-            utter.onend = finalize;
-            utter.onerror = finalize;
+            utter.onend = finish;
+            utter.onerror = (event) => {
+                // interrupted/canceled 通常是用户主动切换内容，不需要重试；其他错误
+                // 若尚未开始则按一次静默失败重试。
+                if(token !== speechSessionId) return;
+                if(!started && event?.error !== 'canceled' && event?.error !== 'interrupted') retry();
+                else finish();
+            };
 
             try {
                 speechSynthesis.speak(utter);
-            } catch (error) {
-                clearTimeout(watchdog);
-                isSpeaking = false;
-                currentUtterance = null;
-                currentIndicatorEl = null;
-                if (indicatorEl) indicatorEl.classList.remove('speaking');
+            } catch(error) {
+                retry();
             }
         }, SPEECH_PRE_SPEAK_DELAY);
     }
@@ -3775,93 +3743,161 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
         if(!('speechSynthesis' in window) || !items.length) return;
         const token = ++speechSessionId;
         stopSpeechSoft();
-        let i = 0;
-        function next(){
+        let index = 0;
+
+        const next = () => {
             if(token !== speechSessionId) return;
-            if(i >= items.length){
-                items.forEach(({indicatorEl}) => { if(indicatorEl) indicatorEl.classList.remove('speaking'); });
+            if(index >= items.length){
+                items.forEach(({indicatorEl}) => clearSpeechIndicator(indicatorEl));
+                isSpeaking = false;
+                currentUtterance = null;
+                currentIndicatorEl = null;
                 return;
             }
-            const { text, indicatorEl } = items[i++];
-            // 与 speakOne 一致：cancel()/上一句结束后，稍等一小段时间再 speak()，
-            // 减少引擎"卡死后不出声"的概率。
+
+            const { text, indicatorEl } = items[index++];
+            if(!String(text || '').trim()) return next();
+
             setTimeout(() => {
-                if (token !== speechSessionId) return;
+                if(token !== speechSessionId) return;
+                try { speechSynthesis.resume(); } catch(error) {}
+
                 const utter = makeUtterance(text);
+                currentUtterance = utter;
+                currentIndicatorEl = indicatorEl || null;
+                isSpeaking = true;
                 let started = false;
+                let settled = false;
+                let retryCount = 0;
 
-                // 看门狗：这一句如果既没 onstart 也没 onend/onerror，说明大概率被引擎
-                // 静默吞掉了。之前的实现完全没有这层保护，一旦某一句卡住，onend 永远
-                // 不会触发，next() 也就永远不会被调用，导致"点了绘本却没声音，之后
-                // 点绘本页也没反应"且无法自行恢复。现在主动 cancel() 后跳到下一句，
-                // 保证不会被单句的偶发失败拖垮整段朗读。
-                const watchdog = setTimeout(() => {
-                    if (token !== speechSessionId) return;
-                    if (!started) {
-                        try { speechSynthesis.cancel(); } catch (error) { /* noop */ }
-                        if (indicatorEl) indicatorEl.classList.remove('speaking');
+                const run = () => {
+                    if(token !== speechSessionId) return;
+                    try { speechSynthesis.resume(); } catch(error) {}
+                    const activeUtter = retryCount === 0 ? utter : makeUtterance(text);
+                    currentUtterance = activeUtter;
+                    started = false;
+                    settled = false;
+
+                    const watchdog = setTimeout(() => {
+                        if(token !== speechSessionId || settled) return;
+                        if(!started && retryCount < SPEECH_MAX_RETRIES){
+                            settled = true;
+                            clearSpeechIndicator(indicatorEl);
+                            try { speechSynthesis.cancel(); } catch(error) {}
+                            retryCount += 1;
+                            setTimeout(run, 120);
+                        } else {
+                            settled = true;
+                            clearSpeechIndicator(indicatorEl);
+                            next();
+                        }
+                    }, SPEECH_START_TIMEOUT);
+
+                    const finish = () => {
+                        if(settled) return;
+                        settled = true;
+                        clearTimeout(watchdog);
+                        if(token !== speechSessionId) return;
+                        clearSpeechIndicator(indicatorEl);
                         next();
+                    };
+                    activeUtter.onstart = () => {
+                        if(token !== speechSessionId) return;
+                        started = true;
+                        clearTimeout(watchdog);
+                        if(indicatorEl) indicatorEl.classList.add('speaking');
+                    };
+                    activeUtter.onend = finish;
+                    activeUtter.onerror = (event) => {
+                        if(token !== speechSessionId) return;
+                        clearTimeout(watchdog);
+                        if(!started && event?.error !== 'canceled' && event?.error !== 'interrupted' && retryCount < SPEECH_MAX_RETRIES){
+                            settled = true;
+                            clearSpeechIndicator(indicatorEl);
+                            try { speechSynthesis.cancel(); } catch(error) {}
+                            retryCount += 1;
+                            setTimeout(run, 120);
+                            return;
+                        }
+                        finish();
+                    };
+                    try { speechSynthesis.speak(activeUtter); }
+                    catch(error){
+                        clearTimeout(watchdog);
+                        if(retryCount < SPEECH_MAX_RETRIES){
+                            retryCount += 1;
+                            setTimeout(run, 120);
+                        } else finish();
                     }
-                }, SPEECH_START_TIMEOUT);
-
-                utter.onstart = ()=> {
-                    started = true;
-                    clearTimeout(watchdog);
-                    if(token === speechSessionId && indicatorEl) indicatorEl.classList.add('speaking');
                 };
-                utter.onend = ()=> {
-                    clearTimeout(watchdog);
-                    if(token !== speechSessionId) return;
-                    if(indicatorEl) indicatorEl.classList.remove('speaking');
-                    next();
-                };
-                utter.onerror = ()=> {
-                    clearTimeout(watchdog);
-                    if(token !== speechSessionId) return;
-                    if(indicatorEl) indicatorEl.classList.remove('speaking');
-                    next();
-                };
-                try {
-                    speechSynthesis.speak(utter);
-                } catch (error) {
-                    clearTimeout(watchdog);
-                    if(indicatorEl) indicatorEl.classList.remove('speaking');
-                    next();
-                }
+                run();
             }, SPEECH_PRE_SPEAK_DELAY);
-        }
+        };
         next();
     }
 
     function ensureHtmlPointReader(html) {
-        const fallbackScript = `<script data-tappy-point-reader="v2">(function(){
-            // 与主页面一致的修复：cancel() 后不要在同一时刻立即 speak()（部分浏览器
-            // 会直接丢弃），并加一个低频后台定时器纠正"卡在 paused"/"超过15秒被
-            // 引擎自动静音"这两种已知问题，避免用久了点单词也读不出声。
-            if('speechSynthesis' in window){
-                setInterval(function(){
-                    try {
-                        if(speechSynthesis.speaking){ speechSynthesis.pause(); speechSynthesis.resume(); }
-                        else if(speechSynthesis.paused){ speechSynthesis.resume(); }
-                    } catch(e){}
-                }, 6000);
-            }
-            function speak(text){
+        const fallbackScript = `<script data-tappy-point-reader="v3">(function(){
+            // 独立 HTML 页面也使用同样的 Chrome 安全策略：不再周期性 pause/resume，
+            // 仅在可见时 resume；speak 静默失败时自动重试一次。
+            let currentUtterance = null;
+            let speechToken = 0;
+            function speak(text, retry){
                 if(!text || !('speechSynthesis' in window)) return;
+                retry = retry || 0;
+                const token = ++speechToken;
                 try { speechSynthesis.cancel(); } catch(e){}
                 try { speechSynthesis.resume(); } catch(e){}
                 setTimeout(function(){
+                    if(token !== speechToken) return;
                     const utterance = new SpeechSynthesisUtterance(text);
+                    currentUtterance = utterance;
                     utterance.rate = 0.8;
                     utterance.pitch = 0.92;
-                    try { speechSynthesis.speak(utterance); } catch(e){}
-                }, 30);
+                    let started = false;
+                    let settled = false;
+                    const watchdog = setTimeout(function(){
+                        if(settled || token !== speechToken) return;
+                        settled = true;
+                        if(!started && retry < 1){
+                            try { speechSynthesis.cancel(); } catch(e){}
+                            setTimeout(function(){ speak(text, retry + 1); }, 120);
+                        }
+                    }, 4500);
+                    function done(){
+                        if(settled) return;
+                        settled = true;
+                        clearTimeout(watchdog);
+                        if(token === speechToken) currentUtterance = null;
+                    }
+                    utterance.onstart = function(){ started = true; clearTimeout(watchdog); };
+                    utterance.onend = done;
+                    utterance.onerror = function(){
+                        clearTimeout(watchdog);
+                        if(!started && retry < 1){
+                            settled = true;
+                            try { speechSynthesis.cancel(); } catch(e){}
+                            setTimeout(function(){ speak(text, retry + 1); }, 120);
+                        } else done();
+                    };
+                    try { speechSynthesis.speak(utterance); } catch(e){
+                        clearTimeout(watchdog);
+                        if(retry < 1) setTimeout(function(){ speak(text, retry + 1); }, 120);
+                    }
+                }, 80);
+            }
+            if('speechSynthesis' in window){
+                document.addEventListener('visibilitychange', function(){
+                    if(document.visibilityState === 'visible'){
+                        try { speechSynthesis.resume(); } catch(e){}
+                    }
+                });
             }
             function bind(){
-                document.querySelectorAll('.tappy-word').forEach(word => {
+                document.querySelectorAll('.tappy-word').forEach(function(word){
                     if(word.dataset.tappySpeechBound) return;
                     word.dataset.tappySpeechBound = '1';
-                    word.addEventListener('click', event => { event.stopPropagation(); speak(word.textContent.trim()); });
+                    word.addEventListener('click', function(event){ event.stopPropagation(); speak(word.textContent.trim(), 0); });
                 });
             }
             if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind); else bind();
