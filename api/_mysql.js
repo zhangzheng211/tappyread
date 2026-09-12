@@ -13,6 +13,8 @@ export function getPool() {
       database: process.env.MYSQL_DATABASE || 'tappyread',
       waitForConnections: true,
       connectionLimit: 5,
+      connectTimeout: 5000,
+      enableKeepAlive: true,
       charset: 'utf8mb4',
       ssl: { rejectUnauthorized: false }
     });
@@ -85,7 +87,7 @@ export async function lookupIpRegion(ip) {
   }
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 2000);
+    const timer = setTimeout(() => controller.abort(), 800);
     const resp = await fetch(`http://ip-api.com/json/${encodeURIComponent(bare)}?lang=zh-CN&fields=status,regionName,city`, { signal: controller.signal });
     clearTimeout(timer);
     if (!resp.ok) return null;

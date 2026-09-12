@@ -56,7 +56,7 @@ export default async function handler(req, res) {
     );
     res.setHeader('Set-Cookie', `tappyread_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${Number(process.env.SESSION_DAYS || 7) * 86400}`);
     // 登录日志：不阻塞响应，失败也不影响登录本身
-    await writeLoginLog(rows[0].username, 'login', req);
+    writeLoginLog(rows[0].username, 'login', req).catch(() => {});
     sendJson(res, 200, { token, username: rows[0].username, userId: rows[0].id });
   } catch (error) {
     console.error('Vercel login error:', error);

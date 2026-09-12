@@ -14,7 +14,7 @@ const cosClient = cosConfigured
       // 一旦网络抖动（跨太平洋链路很常见），SDK 默认的重试机制会让请求越等越久。
       // 这里给单次请求设置 8 秒硬超时，超时就直接失败，交给上层做快速降级，
       // 而不是让整个 /api/library 请求被拖到几十秒甚至更久。
-      Timeout: 8000
+      Timeout: 3000
     })
   : null;
 
