@@ -1,4 +1,5 @@
 import { authenticate } from '../_mysql.js';
+import COS from 'cos-nodejs-sdk-v5';
 
 const COS_BUCKET = process.env.COS_BUCKET || 'tappyreadjpeg-1325106148';
 const COS_REGION = process.env.COS_REGION || 'ap-guangzhou';
@@ -7,9 +8,17 @@ const COS_HTML_DIR = (process.env.COS_HTML_DIR || 'html').replace(/\/+$/, '');
 const COS_JSON_DIR = (process.env.COS_JSON_DIR || 'json').replace(/\/+$/, '');
 const COS_TEMPLATE_KEY = process.env.COS_TEMPLATE_KEY || `${COS_JSON_DIR}/start.json`;
 const cosConfigured = Boolean(process.env.COS_SECRET_ID && process.env.COS_SECRET_KEY);
+const cosClient = cosConfigured ? new COS({SecretId: process.env.COS_SECRET_ID, SecretKey: process.env.COS_SECRET_KEY, Timeout: 3000}) : null;
 
 function sendJson(res, status, body) {
   res.status(status).setHeader('Content-Type', 'application/json; charset=utf-8').end(JSON.stringify(body));
+}
+
+function objectExists(Key) {
+  return new Promise(resolve => {
+    if(!cosClient) return resolve(false);
+    cosClient.headObject({Bucket:COS_BUCKET, Region:COS_REGION, Key}, err => resolve(!err));
+  });
 }
 
 function sanitizeUsername(name) {
@@ -25,13 +34,16 @@ export default async function handler(req, res) {
     const user = await authenticate(req);
     if (!user) return sendJson(res, 401, { error: '未登录或登录已过期' });
     const safeUsername = sanitizeUsername(user.username).replace(/_+$/g, '') || 'guest';
+    const jsonKey = `${COS_JSON_DIR}/${safeUsername}.json`;
+    const userLibraryExists = await objectExists(jsonKey);
     return sendJson(res, 200, {
       enabled: cosConfigured,
       bucket: COS_BUCKET,
       region: COS_REGION,
       userId: user.id,
       username: user.username,
-      jsonKey: `${COS_JSON_DIR}/${safeUsername}.json`,
+      jsonKey,
+      userLibraryExists,
       templateKey: COS_TEMPLATE_KEY,
       imgDir: COS_IMG_DIR,
       htmlDir: COS_HTML_DIR

@@ -2763,17 +2763,15 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
         let data = null;
         let loadedFromTemplate = false;
 
-        // 第一优先级：当前用户自己的 json/{username}.json。
-        // 只有明确得到 404，才允许使用公共 start.json 模板，避免网络抖动时把已有用户
-        // 的云端数据误判成不存在并覆盖掉。
-        try {
+        // 新用户第一次登录没有 json/{username}.json 是正常状态。
+        // 由 /api/cos/config 提前判断对象是否存在，避免浏览器直接请求不存在的 COS key，
+        // 不再产生 GET json/1.json 404。
+        if(COS_DIRECT.config.userLibraryExists){
             const text = await cosGetDirectTextWithRetry(COS_DIRECT.config.jsonKey);
             if(text){
                 const parsed = JSON.parse(text);
                 if(parsed && Array.isArray(parsed.tree)) data = parsed;
             }
-        } catch(userFileError) {
-            if(!isCosNotFoundError(userFileError)) throw userFileError;
         }
 
         // 新用户没有自己的目录文件时：浏览器直接从 COS 读取 json/start.json。
