@@ -2757,7 +2757,22 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
         let directClient = await getCosDirectClient().catch(() => null);
         if(!directClient) directClient = await getCosDirectClient().catch(() => null);
         if(!directClient || !COS_DIRECT.config || !COS_DIRECT.config.jsonKey){
-            throw new Error('COS 直读客户端不可用');
+            // Vercel/COS直连失败时，优先走同域API，由服务端读取start.json，避免新用户首登失败
+            const apiResp = await fetch('/api/library', { credentials:'include' });
+            if(apiResp.ok){
+                const apiData = await apiResp.json();
+                if(apiData && Array.isArray(apiData.tree) && apiData.tree.length){
+                    library = apiData.tree;
+                    collapsedNodes = new Set(apiData.collapsed || []);
+                    selectedFolderId = apiData.selectedFolderId || null;
+                    currentStoryId = apiData.currentStoryId || null;
+                    showTreeLoading(false);
+                    renderTree();
+                    renderAll(false);
+                    return;
+                }
+            }
+            throw new Error('COS直读与API目录均不可用');
         }
 
         let data = null;

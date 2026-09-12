@@ -35,7 +35,7 @@ export default async function handler(req, res) {
     if (!user) return sendJson(res, 401, { error: '未登录或登录已过期' });
     const safeUsername = sanitizeUsername(user.username).replace(/_+$/g, '') || 'guest';
     const jsonKey = `${COS_JSON_DIR}/${safeUsername}.json`;
-    const userLibraryExists = await objectExists(jsonKey);
+    const userLibraryExists = false; // 新用户默认走 start.json；避免 Vercel 跨区 headObject 超时
     return sendJson(res, 200, {
       enabled: cosConfigured,
       bucket: COS_BUCKET,
