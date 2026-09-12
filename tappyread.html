@@ -1238,6 +1238,7 @@ body.reader-fullscreen .stage-wrap {
             <div class="right-group">
                 <button class="action-btn action-btn-pink" id="helpBtn">❓ 使用说明</button>
                 <button class="action-btn action-btn-teal" id="pdfConvertBtn">📄 PDF转图片</button>
+                <button class="action-btn action-btn-purple" id="resetSpeechBtn">🔄 重置语音</button>
                 <button class="action-btn action-btn-blue" id="newStoryBtn">📖 新增绘本</button>
                 <button class="add-page-btn" id="openAddModalBtn">➕ 添加图片绘本</button>
                 <button class="action-btn action-btn-html" id="htmlGenerateBtn" style="display:none;">⚡ 添加HTML绘本</button>  <!-- ⬅️ 添加 style="display:none;"，如果要显示出来则修改style="display:inline-flex;" -->
@@ -2753,27 +2754,26 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
     if(!paintedFromCache) showTreeLoading(true);
 
     try{
-        // 🆕 直连客户端本身依赖一次 /api/cos/config 请求，偶发网络抖动时重试一次
-        let directClient = await getCosDirectClient().catch(() => null);
-        if(!directClient) directClient = await getCosDirectClient().catch(() => null);
-        if(!directClient || !COS_DIRECT.config || !COS_DIRECT.config.jsonKey){
-            // Vercel/COS直连失败时，优先走同域API，由服务端读取start.json，避免新用户首登失败
-            const apiResp = await fetch('/api/library', { credentials:'include' });
-            if(apiResp.ok){
-                const apiData = await apiResp.json();
-                if(apiData && Array.isArray(apiData.tree) && apiData.tree.length){
-                    library = apiData.tree;
-                    collapsedNodes = new Set(apiData.collapsed || []);
-                    selectedFolderId = apiData.selectedFolderId || null;
-                    currentStoryId = apiData.currentStoryId || null;
-                    showTreeLoading(false);
-                    renderTree();
-                    renderAll(false);
-                    return;
-                }
+        // V6架构：目录不再依赖浏览器COS直连。
+        // 用户目录、start.json均由同域API读取，COS直连只用于图片资源。
+        // 这样避免Vercel环境初始化COS临时密钥导致AbortError。
+        const apiResp = await fetch('/api/library', { credentials:'include' });
+        if(apiResp.ok){
+            const apiData = await apiResp.json();
+            if(apiData && Array.isArray(apiData.tree) && apiData.tree.length){
+                library = apiData.tree;
+                collapsedNodes = new Set(apiData.collapsed || []);
+                selectedFolderId = apiData.selectedFolderId || null;
+                currentStoryId = apiData.currentStoryId || null;
+                showTreeLoading(false);
+                renderTree();
+                renderAll(false);
+                return;
             }
-            throw new Error('COS直读与API目录均不可用');
         }
+        // API异常时才尝试COS目录直读作为最后兜底
+        const directClient = await getCosDirectClient().catch(() => null);
+        if(!directClient || !COS_DIRECT.config) throw new Error('目录服务暂不可用');
 
         let data = null;
         let loadedFromTemplate = false;
@@ -3678,6 +3678,30 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
             try { speechSynthesis.resume(); } catch(error) {}
         }
     }
+
+    // 手动恢复浏览器语音引擎。Chrome speechSynthesis 长时间运行后偶发进入假死状态，
+    // 该操作不会改变朗读配置，只重新初始化播放管线。
+    function resetSpeechEngine(){
+        speechSessionId++;
+        isSpeaking = false;
+        currentUtterance = null;
+        if(currentIndicatorEl) clearSpeechIndicator(currentIndicatorEl);
+        currentIndicatorEl = null;
+        if('speechSynthesis' in window){
+            try { speechSynthesis.cancel(); } catch(e) {}
+            try { speechSynthesis.resume(); } catch(e) {}
+            setTimeout(()=>{
+                try {
+                    loadVoices();
+                    const warmup = new SpeechSynthesisUtterance('');
+                    warmup.volume = 0;
+                    speechSynthesis.speak(warmup);
+                } catch(e) {}
+            }, 150);
+        }
+    }
+
+    document.getElementById('resetSpeechBtn')?.addEventListener('click', resetSpeechEngine);
 
     if('speechSynthesis' in window){
         document.addEventListener('visibilitychange', () => {
