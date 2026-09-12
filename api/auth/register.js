@@ -45,7 +45,7 @@ export default async function handler(req, res) {
 
     // 注册成功立即返回：COS 默认绘本初始化改由前端直连 COS 完成；
     // 登录日志继续后台写入，绝不阻塞注册响应。
-    writeLoginLog(username, 'register', req).catch(() => {});
+    writeLoginLog(username, 'register', req);
 
     return sendJson(res, 201, { token, username, userId: result.insertId });
   } catch (error) {
