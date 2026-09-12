@@ -2712,6 +2712,20 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
         return status === 404 || code === 'nosuchkey' || code === 'notfound' || code === 'no_such_key';
     }
 
+    // 🆕 带一次重试的 COS 直读：网络偶发抖动（不是"文件真的不存在"）时，
+    // 稍等一下再试一次，避免单次瞬时失败就直接判定"读不到默认绘本"。
+    async function cosGetDirectTextWithRetry(key, retries = 1){
+        try {
+            return await cosGetDirectText(key);
+        } catch(error) {
+            if(retries > 0 && !isCosNotFoundError(error)){
+                await new Promise(resolve => setTimeout(resolve, 500));
+                return cosGetDirectTextWithRetry(key, retries - 1);
+            }
+            throw error;
+        }
+    }
+
     async function loadRemoteLibrary()
     {
     const token = localStorage.getItem(AUTH_TOKEN_KEY);
@@ -2739,7 +2753,9 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
     if(!paintedFromCache) showTreeLoading(true);
 
     try{
-        const directClient = await getCosDirectClient().catch(() => null);
+        // 🆕 直连客户端本身依赖一次 /api/cos/config 请求，偶发网络抖动时重试一次
+        let directClient = await getCosDirectClient().catch(() => null);
+        if(!directClient) directClient = await getCosDirectClient().catch(() => null);
         if(!directClient || !COS_DIRECT.config || !COS_DIRECT.config.jsonKey){
             throw new Error('COS 直读客户端不可用');
         }
@@ -2751,7 +2767,7 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
         // 只有明确得到 404，才允许使用公共 start.json 模板，避免网络抖动时把已有用户
         // 的云端数据误判成不存在并覆盖掉。
         try {
-            const text = await cosGetDirectText(COS_DIRECT.config.jsonKey);
+            const text = await cosGetDirectTextWithRetry(COS_DIRECT.config.jsonKey);
             if(text){
                 const parsed = JSON.parse(text);
                 if(parsed && Array.isArray(parsed.tree)) data = parsed;
@@ -2763,7 +2779,7 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
         // 新用户没有自己的目录文件时：浏览器直接从 COS 读取 json/start.json。
         // 注册接口不再下载/复制 start.json，彻底移除“注册等待 COS”的超时链路。
         if(!data && COS_DIRECT.config.templateKey){
-            const text = await cosGetDirectText(COS_DIRECT.config.templateKey);
+            const text = await cosGetDirectTextWithRetry(COS_DIRECT.config.templateKey);
             if(text){
                 const parsed = JSON.parse(text);
                 if(parsed && Array.isArray(parsed.tree)){
@@ -3656,6 +3672,14 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
                 try { speechSynthesis.resume(); } catch(error) {}
             }
         });
+        // 🆕 只 resume()、绝不 pause()：修复"用一段时间后彻底不出声"这个 Chrome
+        // 已知问题（引擎偶发自己卡在 paused 状态，此后所有 speak() 都静默失败）。
+        // 之前版本用的是周期性 pause()+resume()，会打断正在进行的正常朗读，
+        // 所以被移除了；但只调用 resume() 在正常播放时是无害的空操作，不会有
+        // 这个副作用，可以放心常驻。
+        setInterval(() => {
+            try { speechSynthesis.resume(); } catch(error) {}
+        }, 4000);
     }
 
     function speakOne(text, indicatorEl, retryCount = 0) {
@@ -3683,11 +3707,13 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
             isSpeaking = true;
             let started = false;
             let settled = false;
+            let heartbeat = null;
 
             const finish = () => {
                 if(settled) return;
                 settled = true;
                 clearTimeout(watchdog);
+                clearInterval(heartbeat);
                 if(token !== speechSessionId) return;
                 isSpeaking = false;
                 currentUtterance = null;
@@ -3699,6 +3725,7 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
                 if(settled) return;
                 settled = true;
                 clearTimeout(watchdog);
+                clearInterval(heartbeat);
                 if(token !== speechSessionId) return;
                 isSpeaking = false;
                 currentUtterance = null;
@@ -3721,6 +3748,18 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
                 started = true;
                 clearTimeout(watchdog);
                 if(indicatorEl) indicatorEl.classList.add('speaking');
+                // 🆕 心跳检测：长句子在 Chrome 上偶发会读到一半被引擎静默截断——
+                // 既不触发 onend 也不触发 onerror，表现就是"看起来还在读、其实
+                // 已经没声音了"。这里每 1.5 秒确认一次 speechSynthesis.speaking，
+                // 一旦发现已经变成 false（且不是我们自己 cancel 导致），直接按
+                // 正常读完处理，避免状态卡死、影响下一次点击。
+                heartbeat = setInterval(() => {
+                    if(settled || token !== speechSessionId){ clearInterval(heartbeat); return; }
+                    if(started && !speechSynthesis.speaking){
+                        clearInterval(heartbeat);
+                        finish();
+                    }
+                }, 1500);
             };
             utter.onend = finish;
             utter.onerror = (event) => {
@@ -3777,17 +3816,20 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
                     currentUtterance = activeUtter;
                     started = false;
                     settled = false;
+                    let heartbeat = null;
 
                     const watchdog = setTimeout(() => {
                         if(token !== speechSessionId || settled) return;
                         if(!started && retryCount < SPEECH_MAX_RETRIES){
                             settled = true;
+                            clearInterval(heartbeat);
                             clearSpeechIndicator(indicatorEl);
                             try { speechSynthesis.cancel(); } catch(error) {}
                             retryCount += 1;
                             setTimeout(run, 120);
                         } else {
                             settled = true;
+                            clearInterval(heartbeat);
                             clearSpeechIndicator(indicatorEl);
                             next();
                         }
@@ -3797,6 +3839,7 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
                         if(settled) return;
                         settled = true;
                         clearTimeout(watchdog);
+                        clearInterval(heartbeat);
                         if(token !== speechSessionId) return;
                         clearSpeechIndicator(indicatorEl);
                         next();
@@ -3806,11 +3849,21 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
                         started = true;
                         clearTimeout(watchdog);
                         if(indicatorEl) indicatorEl.classList.add('speaking');
+                        // 🆕 心跳检测：跟 speakOne 同理，防止长句子被引擎静默截断后
+                        // 卡住，导致整段自动朗读停在半路、之后的页不再继续读。
+                        heartbeat = setInterval(() => {
+                            if(settled || token !== speechSessionId){ clearInterval(heartbeat); return; }
+                            if(started && !speechSynthesis.speaking){
+                                clearInterval(heartbeat);
+                                finish();
+                            }
+                        }, 1500);
                     };
                     activeUtter.onend = finish;
                     activeUtter.onerror = (event) => {
                         if(token !== speechSessionId) return;
                         clearTimeout(watchdog);
+                        clearInterval(heartbeat);
                         if(!started && event?.error !== 'canceled' && event?.error !== 'interrupted' && retryCount < SPEECH_MAX_RETRIES){
                             settled = true;
                             clearSpeechIndicator(indicatorEl);
@@ -3824,6 +3877,7 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
                     try { speechSynthesis.speak(activeUtter); }
                     catch(error){
                         clearTimeout(watchdog);
+                        clearInterval(heartbeat);
                         if(retryCount < SPEECH_MAX_RETRIES){
                             retryCount += 1;
                             setTimeout(run, 120);
@@ -3856,9 +3910,11 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
                     utterance.pitch = 0.92;
                     let started = false;
                     let settled = false;
+                    let heartbeat = null;
                     const watchdog = setTimeout(function(){
                         if(settled || token !== speechToken) return;
                         settled = true;
+                        clearInterval(heartbeat);
                         if(!started && retry < 1){
                             try { speechSynthesis.cancel(); } catch(e){}
                             setTimeout(function(){ speak(text, retry + 1); }, 120);
@@ -3868,9 +3924,21 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
                         if(settled) return;
                         settled = true;
                         clearTimeout(watchdog);
+                        clearInterval(heartbeat);
                         if(token === speechToken) currentUtterance = null;
                     }
-                    utterance.onstart = function(){ started = true; clearTimeout(watchdog); };
+                    utterance.onstart = function(){
+                        started = true;
+                        clearTimeout(watchdog);
+                        // 心跳：长句子被引擎静默截断时（不触发onend/onerror），主动收尾
+                        heartbeat = setInterval(function(){
+                            if(settled || token !== speechToken){ clearInterval(heartbeat); return; }
+                            if(started && !speechSynthesis.speaking){
+                                clearInterval(heartbeat);
+                                done();
+                            }
+                        }, 1500);
+                    };
                     utterance.onend = done;
                     utterance.onerror = function(){
                         clearTimeout(watchdog);
@@ -3892,6 +3960,10 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
                         try { speechSynthesis.resume(); } catch(e){}
                     }
                 });
+                // 只 resume()、绝不 pause()：跟主页面同样的安全保活策略
+                setInterval(function(){
+                    try { speechSynthesis.resume(); } catch(e){}
+                }, 4000);
             }
             function bind(){
                 document.querySelectorAll('.tappy-word').forEach(function(word){
