@@ -2756,29 +2756,13 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
         // 🆕 直连客户端本身依赖一次 /api/cos/config 请求，偶发网络抖动时重试一次
         let directClient = await getCosDirectClient().catch(() => null);
         if(!directClient) directClient = await getCosDirectClient().catch(() => null);
+        if(!directClient || !COS_DIRECT.config || !COS_DIRECT.config.jsonKey){
+            throw new Error('COS 直读客户端不可用');
+        }
 
         let data = null;
         let loadedFromTemplate = false;
 
-        // COS直连失败时不要阻断新用户：Vercel环境可能因CORS/Abort/临时网络失败，
-        // 使用原有API目录读取作为降级通道。
-        if(!directClient || !COS_DIRECT.config || !COS_DIRECT.config.jsonKey){
-            try {
-                const r = await fetch(API_BASE + '/library', {
-                    headers: { Authorization: 'Bearer ' + __authToken },
-                    credentials: 'include'
-                });
-                if(r.ok){
-                    const apiData = await r.json();
-                    if(apiData && Array.isArray(apiData.tree)) data = apiData;
-                }
-            } catch(e) {}
-            if(!data) throw new Error('目录服务暂不可用');
-        }
-
-        if(data) {
-            loadedFromTemplate = false;
-        } else {
         // 第一优先级：当前用户自己的 json/{username}.json。
         // 只有明确得到 404，才允许使用公共 start.json 模板，避免网络抖动时把已有用户
         // 的云端数据误判成不存在并覆盖掉。
@@ -2804,8 +2788,6 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
                 }
             }
         }
-
-        } // end COS direct branch
 
         if(!data){
             throw new Error('COS 用户目录为空');

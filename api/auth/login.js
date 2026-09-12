@@ -15,8 +15,6 @@ function getPool() {
       database: process.env.MYSQL_DATABASE || 'tappyread',
       waitForConnections: true,
       connectionLimit: 5,
-      connectTimeout: 5000,
-      enableKeepAlive: true,
       charset: 'utf8mb4',
       ssl: { rejectUnauthorized: false }
     });

@@ -14,7 +14,7 @@ const cosClient = cosConfigured
       // 一旦网络抖动（跨太平洋链路很常见），SDK 默认的重试机制会让请求越等越久。
       // 这里给单次请求设置 8 秒硬超时，超时就直接失败，交给上层做快速降级，
       // 而不是让整个 /api/library 请求被拖到几十秒甚至更久。
-      Timeout: 8000
+      Timeout: 4000
     })
   : null;
 
@@ -148,6 +148,13 @@ async function getLatestLibraryFromCos(username) {
   }
 }
 
+
+async function getStartLibraryFromCos() {
+  if (!cosConfigured) return null;
+  const snapshot = await readCosJsonFile(`${COS_JSON_DIR}/start.json`);
+  return snapshot && Array.isArray(snapshot.tree) ? snapshot : null;
+}
+
 function sendCosConfigError(res) {
   return sendJson(res, 503, {
     error: 'COS 未配置：请在 Vercel 项目的 Environment Variables 中填写 COS_SECRET_ID 与 COS_SECRET_KEY，然后重新部署（Redeploy）'
@@ -223,6 +230,15 @@ export default async function handler(req, res) {
           collapsed: Array.isArray(snapshot.collapsed) ? snapshot.collapsed : [],
           selectedFolderId: snapshot.selectedFolderId || null,
           currentStoryId: snapshot.currentStoryId || null
+        });
+      }
+      const startSnapshot = await getStartLibraryFromCos().catch(() => null);
+      if (startSnapshot) {
+        return sendJson(res, 200, {
+          tree: startSnapshot.tree,
+          collapsed: Array.isArray(startSnapshot.collapsed) ? startSnapshot.collapsed : [],
+          selectedFolderId: startSnapshot.selectedFolderId || null,
+          currentStoryId: startSnapshot.currentStoryId || null
         });
       }
       return sendJson(res, 200, { tree: [], collapsed: [], selectedFolderId: null, currentStoryId: null });
