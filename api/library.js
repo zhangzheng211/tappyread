@@ -35,12 +35,12 @@ const cosClient = cosConfigured
       Timeout: 10000
     })
   : null;
-//临时日志
- console.log('COS CONFIG:', {
-  bucket: COS_BUCKET,
-  region: COS_REGION,
-  domain: `${COS_BUCKET}.cos.${COS_REGION}.myqcloud.com`
-}); 
+// //临时日志
+//  console.log('COS CONFIG:', {
+//   bucket: COS_BUCKET,
+//   region: COS_REGION,
+//   domain: `${COS_BUCKET}.cos.${COS_REGION}.myqcloud.com`
+// }); 
 
 function sendJson(res, status, body) {
   res
