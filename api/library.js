@@ -13,16 +13,34 @@ const cosConfigured = Boolean(
   process.env.COS_SECRET_ID && process.env.COS_SECRET_KEY
 );
 
+// const cosClient = cosConfigured
+//   ? new COS({
+//       SecretId: process.env.COS_SECRET_ID,
+//       SecretKey: process.env.COS_SECRET_KEY,
+
+//       // Vercel 跨区域访问广州 COS 时，设置较短超时。
+//       // 超时后快速失败，不让整个 /api/library 请求长时间阻塞。
+//       Timeout: 4000
+//     })
+//   : null;
 const cosClient = cosConfigured
   ? new COS({
       SecretId: process.env.COS_SECRET_ID,
       SecretKey: process.env.COS_SECRET_KEY,
 
-      // Vercel 跨区域访问广州 COS 时，设置较短超时。
-      // 超时后快速失败，不让整个 /api/library 请求长时间阻塞。
-      Timeout: 4000
+      // 强制使用标准 COS 域名
+      Domain: `${COS_BUCKET}.cos.${COS_REGION}.myqcloud.com`,
+
+      // Vercel跨区域访问增加超时时间
+      Timeout: 10000
     })
   : null;
+//临时日志
+ console.log('COS CONFIG:', {
+  bucket: COS_BUCKET,
+  region: COS_REGION,
+  domain: `${COS_BUCKET}.cos.${COS_REGION}.myqcloud.com`
+}); 
 
 function sendJson(res, status, body) {
   res
