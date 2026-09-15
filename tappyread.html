@@ -735,18 +735,18 @@
             flex:1; min-width:0;
             font-family:'Baloo 2', sans-serif;
             font-size: clamp(15px, 2.1vw, 22px);
-            font-weight:700; line-height:1.3;
-            max-height: 1.6em;
-            overflow: hidden;
-            white-space: nowrap;
-            text-overflow: ellipsis;
-            cursor: default;
+            font-weight:700;
+            line-height:1.3;
+            max-height:1.6em;
+            overflow:hidden;
+            white-space:nowrap;
+            text-overflow:ellipsis;
+            cursor:default;
         }
         .caption-text.truncated::after {
-            content: "......";
-            font-weight: 700;
-            color: var(--clay);
-            padding-left: 4px;
+            content:"......";
+            font-weight:700;
+            padding-left:4px;
         }
         .word{ cursor:pointer; border-radius:6px; padding:0 2px; transition:background .15s ease,color .15s ease; }
         .word:hover{ background: rgba(90,180,224,0.25); }
@@ -4800,7 +4800,7 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
     function fillCaption(container, text){
         container.innerHTML = '';
         container.classList.remove('truncated');
-        if(!text){
+        if(!text || !String(text).trim()){
             const span = document.createElement('span');
             span.style.opacity = 0.5;
             span.style.fontStyle = 'italic';
@@ -4809,66 +4809,11 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
             return;
         }
 
-        const words = text.trim().split(/\s+/).filter(w => w.length > 0);
-        if (words.length === 0) {
-            const span = document.createElement('span');
-            span.style.opacity = 0.5;
-            span.style.fontStyle = 'italic';
-            span.textContent = '（无朗读文本）';
-            container.appendChild(span);
-            return;
-        }
-
-        const fullText = words.join(' ');
-        const fullSpan = document.createElement('span');
-        fullSpan.style.display = 'inline';
-        fullSpan.style.whiteSpace = 'nowrap';
-        fullSpan.textContent = fullText;
-        container.appendChild(fullSpan);
-
-        requestAnimationFrame(() => {
-            const isOverflow = fullSpan.scrollWidth > container.clientWidth;
-            if (isOverflow) {
-                container.removeChild(fullSpan);
-                let displayWords = [];
-                for (let i = 0; i < words.length; i++) {
-                    const test = displayWords.concat(words[i]).join(' ');
-                    const tmp = document.createElement('span');
-                    tmp.style.display = 'inline';
-                    tmp.style.whiteSpace = 'nowrap';
-                    tmp.textContent = test + '......';
-                    container.appendChild(tmp);
-                    const overflow = tmp.scrollWidth > container.clientWidth;
-                    container.removeChild(tmp);
-                    if (overflow) break;
-                    displayWords.push(words[i]);
-                }
-                if (displayWords.length === 0 && words.length > 0) {
-                    displayWords = [words[0]];
-                }
-                container.innerHTML = '';
-                const finalText = displayWords.join(' ');
-                const span = document.createElement('span');
-                span.style.display = 'inline';
-                span.style.whiteSpace = 'nowrap';
-                span.textContent = finalText;
-                container.appendChild(span);
-                const ellipsisSpan = document.createElement('span');
-                ellipsisSpan.textContent = '......';
-                ellipsisSpan.style.fontWeight = '700';
-                ellipsisSpan.style.color = 'var(--clay)';
-                ellipsisSpan.style.marginLeft = '2px';
-                ellipsisSpan.className = 'word';
-                ellipsisSpan.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    speakOne(fullText, container.closest('.page-panel')?.querySelector('.mini-speaker'));
-                });
-                container.appendChild(ellipsisSpan);
-                container.classList.add('truncated');
-            } else {
-                container.classList.remove('truncated');
-            }
-        });
+        // 鼠标悬停显示框恢复原来的紧凑显示逻辑
+        const span = document.createElement('span');
+        span.style.display = 'inline';
+        span.textContent = String(text);
+        container.appendChild(span);
     }
 
     function spawnRipple(evt, container){
@@ -5544,10 +5489,10 @@ function createTextOverlay(container, text) {
             lineDiv.style.cssText = `
                 display: block;
                 margin-bottom: ${lineIndex < lines.length - 1 ? '2px' : '0'};
-                white-space: nowrap;
-                word-break: keep-all;
-                overflow: hidden;
-                text-overflow: ellipsis;
+                white-space: normal;
+                word-break: break-word;
+                overflow: visible;
+                text-overflow: unset;
             `;
             
             const parts = line.match(/[^\s]+|\s+/g) || [line];
