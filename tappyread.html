@@ -4989,11 +4989,11 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
         if (!worker) throw new Error('OCR引擎未就绪，请检查网络连接（Tesseract.js 未能加载）');
         const { data } = await worker.recognize(dataUrl);
         const raw = (data && data.text) ? data.text : '';
-        return raw
+        return formatTtsText(raw
             .replace(/\r\n/g, '\n')
             .replace(/[ \t]+\n/g, '\n')
             .replace(/\n{3,}/g, '\n\n')
-            .trim();
+            .trim());
     }
 
     // ---- 屏幕坐标 → 图片自然像素坐标（自动适配 object-fit:contain 的实际渲染区域） ----
@@ -6702,6 +6702,66 @@ nextBtn.addEventListener('click', function() {
         return result;
     }
 
+
+
+    // =====================================================
+    // OCR/TTS文本统一格式化
+    // 识别完成后统一处理，适用于：
+    // 新增绘本、添加页面、图片批量生成、PDF生成、
+    // 抓取文字、框选抓取文字
+    //
+    // 规则：
+    // 1. 标点前后增加空格
+    // 2. 支持 . , ! ? ; : 、 ， ； ： 。 … …… %
+    // 3. 引号增加朗读停顿
+    // 4. 保留 I'm / don't / father's 等所有格
+    // =====================================================
+    function formatTtsText(text) {
+        if (!text || typeof text !== 'string') return '';
+
+        const punct = /(……|[.,!?;:、，；：。…%])/g;
+
+        text = text.replace(
+            /\s*(……|[.,!?;:、，；：。…%])\s*/g,
+            ' $1 '
+        );
+
+        // 单引号开头：'Hello -> ' Hello
+        text = text.replace(
+            /(^|\s)'([A-Za-z])/g,
+            "$1' $2"
+        );
+
+        // 标点后的引用：,'said -> , ' said
+        text = text.replace(
+            /([.,!?;:。；：…])\s*'/g,
+            "$1 ' "
+        );
+
+        // 双引号
+        text = text.replace(
+            /"\s*([A-Za-z])/g,
+            '" $1'
+        );
+
+        text = text.replace(
+            /([.,!?;:。；：…])\s*"/g,
+            '$1 " '
+        );
+
+        // 百分号
+        text = text.replace(
+            /\s*%\s*/g,
+            ' % '
+        );
+
+        // 合并空格，保留换行
+        text = text.replace(/[ \t]+/g, ' ');
+        text = text.replace(/ *\n */g, '\n');
+
+        return text.trim();
+    }
+
     function isGrayscaleImage(imageData) {
         const data = imageData.data;
         const len = data.length;
@@ -6790,7 +6850,7 @@ nextBtn.addEventListener('click', function() {
                 const cropUrl = await cropRegionOptimized(dataUrl, region.bottom, region.top);
                 const { data } = await worker.recognize(cropUrl);
                 const rawText = data && data.text ? data.text : '';
-                const cleaned = cleanOcrTextEnhanced(rawText);
+                const cleaned = formatTtsText(cleanOcrTextEnhanced(rawText));
                 if (cleaned) {
                     const score = scoreTextQuality(cleaned);
                     if (score > bestScore) {
