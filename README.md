@@ -104,7 +104,7 @@ Express 服务 (server/server.js) 或 Vercel 云函数 (api/*)
 网页地址：https://vercel.com/zz-4651/tappyread/AkZmLMwGenQtY9uSiBZ8oMKNYTGz/logs?refreshedAt=1788832171236
 使用github账号登录
 1. 导入仓库，Framework Preset 选 **Other**。
-2. Environment Variables 配置与 `.env` 相同的变量（`MYSQL_*`、`COS_*`、`SESSION_DAYS`）。
+2. Environment Variables 配置与 `.env` 相同的变量（`MYSQL_*`、`COS_*`、`TENCENT_TTS_*`、`SESSION_DAYS`）。
 3. 部署后访问域名。文件上传/下载直连 COS，**不再受 Vercel 4.5MB 请求体限制**；函数只处理登录与签名等轻量请求。
 
 ## 七、使用流程
@@ -116,7 +116,59 @@ Express 服务 (server/server.js) 或 Vercel 云函数 (api/*)
 5. **刷新/换设备**：自动从 COS 重新加载你的目录（按用户隔离）。
 6. **删除绘本**：COS 上的对应图片/HTML 同步删除。
 
-## 八、常见问题
+## 八、V9 语音朗读优化（腾讯云 TTS，默认英语男声）
+
+### 1. 背景与目标
+
+浏览器原生 `speechSynthesis` 在国内网络环境下存在语音库不稳定、依赖 `Google UK English Male`（国内网络无法稳定访问）、不同系统/浏览器效果差异大、连续朗读后偶发失声等问题。V9 起新增腾讯云语音合成（TTS）作为**默认**朗读引擎，浏览器本地语音降级为**备用**引擎，具体见《V9 语音朗读优化改造需求说明.docx》。
+
+### 2. 架构
+
+```
+用户点击文字/单词
+      │
+      ▼
+tappyread.html  →  speakText(text) / speakOne(text) / speakSequence(items)
+      │                 │
+      │        ① 默认：POST /api/tts（服务端代理，密钥不下发前端）
+      │                 │→ 腾讯云语音合成 TextToVoice（英语男声 WeJack）
+      │                 │→ 返回 base64 MP3 → 浏览器 <audio> 播放
+      │
+      └── ② 腾讯云异常/超时/未配置 → 自动降级 → 浏览器 speechSynthesis（原有稳定性修复全部保留）
+```
+
+- `/api/tts`（Vercel 云函数）与 `server/server.js` 的 `POST /api/tts`（本地开发）逻辑一致，均要求登录（`authenticate`），密钥只从环境变量读取。
+- 前端内置内存音频缓存（同一段文本+同一语速重复朗读直接复用，无需重新请求），并支持可选的腾讯云 COS 音频持久化缓存（见下）。
+- 长文本会在浏览器端按句子边界自动切分为多段，分别合成后连续播放，规避腾讯云单次合成字数上限。
+- 连续失败达到阈值后进入约 1 分钟的"冷却期"，冷却期内直接使用本地语音，避免反复等待超时影响体验；点击「🔄 重置语音」按钮会立即清除冷却、停止当前播放并重新初始化两套引擎。
+
+### 3. 必需的环境变量
+
+| 变量 | 说明 |
+| --- | --- |
+| `TENCENT_TTS_SECRET_ID` / `TENCENT_TTS_SECRET_KEY` | 腾讯云 API 密钥（控制台 → 访问管理 CAM → API 密钥管理）。**必填**，否则 `/api/tts` 返回 503 |
+| `TENCENT_TTS_APP_ID` | 语音合成应用 AppId（控制台 → 语音合成 → 应用管理），当前基础合成接口不强制使用，预留给后续长文本异步合成等扩展 |
+
+可选高级配置（不填使用默认值）：`TENCENT_TTS_REGION`（默认 `ap-guangzhou`）、`TENCENT_TTS_VOICE_TYPE`（默认 `1050`=WeJack 英文男声标准音色）、`TENCENT_TTS_CACHE`（默认开启，填 `0` 关闭 COS 缓存）、`TENCENT_TTS_CACHE_DIR`（默认 `audio`）。
+
+> 开通语音合成服务：[腾讯云控制台 → 语音合成 TTS](https://console.cloud.tencent.com/tts) → 新建应用即可获得 AppId；密钥与 COS 共用同一套「访问管理 CAM → API 密钥管理」，也可以单独为 TTS 创建一组子账号密钥并只授予 `QcloudTTSFullAccess` 权限，遵循最小权限原则。
+
+### 4. 音色与语速
+
+- 默认音色：`VoiceType=1050`（WeJack，英文男声，标准音色，账号无需额外开通）。如已开通精品/大模型音色，可将 `TENCENT_TTS_VOICE_TYPE` 改为 `101050`（WeJack 精品）或 `501008`（WeJames 大模型）等，完整音色表见腾讯云文档「语音合成 → 音色列表」。
+- 语速沿用页面原有的语速滑块（0.6～1.1，1.0 为正常速度），服务端按腾讯云 `Speed` 参数区间（[-2, 6]，每 0.2 倍速对应 1 档）等比换算，浏览器备用引擎与腾讯云音色的听感语速基本保持一致。
+
+### 5. 音频缓存（可选，需要额外的 COS 权限）
+
+同时配置了 `COS_SECRET_ID` / `COS_SECRET_KEY` 时，`/api/tts` 会在同一个 COS 桶下按 `audio/{文本+音色+语速哈希}.mp3` 缓存已合成的音频：命中缓存直接返回，未命中则调用腾讯云合成后异步写入缓存（不阻塞本次播放）。这能显著降低重复朗读（同一页反复点读）时的腾讯云调用次数、加快后续播放速度。不需要该能力时设置 `TENCENT_TTS_CACHE=0` 关闭。
+
+### 6. 兼容性与安全
+
+- 已验证兼容 Chrome / Edge，且不依赖 VPN、代理或本地安装语音包；腾讯云异常时自动无缝降级，不影响原有点读、单句朗读、整页朗读、自动翻页朗读、语速控制、语音选择、暂停/继续/停止等既有功能。
+- `SecretId` / `SecretKey` 全程只存在于服务端环境变量中，前端与浏览器网络面板都无法看到；`/api/tts` 与其他业务接口一样要求登录态，并做了简单的按用户限流，避免异常调用导致腾讯云账单激增。
+- 说明：为「一键生成绘本」导出的**独立 HTML 点读页**（脱离本应用、可单独打开的 HTML 文件）目前仍使用浏览器 `speechSynthesis`，未接入腾讯云 TTS——这类独立文件没有后端会话，若要接入需额外设计免登录/限量的公开代理接口，超出本次改造范围，如有需要可在后续版本中单独实现。
+
+## 九、常见问题
 
 - **直传失败/一直走降级？** 检查：① `.env` 或 Vercel 环境变量是否配了 `COS_SECRET_ID/KEY`；② COS 桶 CORS 是否按「二」配置（控制台报 CORS 错即此因）；③ 浏览器控制台网络面板看 `GET /api/cos/auth` 是否 200。
 - **6MB+ 目录还是传不上？** 确认不是走了降级链路（控制台会有"回退后端中转"警告）；直传模式下 COS 简单上传上限 5GB，不存在 4~6MB 失败的场景。

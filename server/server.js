@@ -50,6 +50,107 @@ const cosClient = cosConfigured
   ? new COS({ SecretId: process.env.COS_SECRET_ID, SecretKey: process.env.COS_SECRET_KEY })
   : null;
 
+/* =====================================================================
+   V9 语音引擎升级：腾讯云语音合成（TTS）
+   本地开发服务器（server/server.js）与 Vercel 版（api/tts.js）逻辑保持一致，
+   密钥只从环境变量读取，绝不下发到前端。
+   ===================================================================== */
+const TTS_HOST = 'tts.tencentcloudapi.com';
+const TTS_SERVICE = 'tts';
+const TTS_VERSION = '2019-08-23';
+const TTS_ACTION = 'TextToVoice';
+const TTS_REGION = process.env.TENCENT_TTS_REGION || 'ap-guangzhou';
+// 1050 = WeJack，腾讯云标准音色英语男声；如已开通精品/大模型音色可用环境变量覆盖
+const TTS_VOICE_TYPE = Number(process.env.TENCENT_TTS_VOICE_TYPE || 1050);
+const TTS_MAX_CHARS = 500;
+const TTS_CACHE_DIR = (process.env.TENCENT_TTS_CACHE_DIR || 'audio').replace(/\/+$/, '');
+const TTS_CACHE_ENABLED = cosConfigured && process.env.TENCENT_TTS_CACHE !== '0';
+
+function ttsSha256Hex(message) {
+  return crypto.createHash('sha256').update(message, 'utf8').digest('hex');
+}
+function ttsHmac(key, msg) {
+  return crypto.createHmac('sha256', key).update(msg, 'utf8').digest();
+}
+function buildTtsAuthorization({ secretId, secretKey, payload, timestamp }) {
+  const date = new Date(timestamp * 1000).toISOString().slice(0, 10);
+  const contentType = 'application/json; charset=utf-8';
+  const canonicalHeaders = `content-type:${contentType}\nhost:${TTS_HOST}\nx-tc-action:${TTS_ACTION.toLowerCase()}\n`;
+  const signedHeaders = 'content-type;host;x-tc-action';
+  const canonicalRequest = ['POST', '/', '', canonicalHeaders, signedHeaders, ttsSha256Hex(payload)].join('\n');
+  const credentialScope = `${date}/${TTS_SERVICE}/tc3_request`;
+  const stringToSign = ['TC3-HMAC-SHA256', timestamp, credentialScope, ttsSha256Hex(canonicalRequest)].join('\n');
+  const secretDate = ttsHmac('TC3' + secretKey, date);
+  const secretService = ttsHmac(secretDate, TTS_SERVICE);
+  const secretSigning = ttsHmac(secretService, 'tc3_request');
+  const signature = ttsHmac(secretSigning, stringToSign).toString('hex');
+  return `TC3-HMAC-SHA256 Credential=${secretId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+}
+async function synthesizeWithTencent({ secretId, secretKey, text, speed }) {
+  const sessionId = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex');
+  const payload = JSON.stringify({
+    Text: text,
+    SessionId: sessionId,
+    Volume: 0,
+    Speed: Number(speed.toFixed(2)),
+    ProjectId: 0,
+    ModelType: 1,
+    VoiceType: TTS_VOICE_TYPE,
+    Codec: 'mp3',
+    SampleRate: 16000
+  });
+  const timestamp = Math.floor(Date.now() / 1000);
+  const authorization = buildTtsAuthorization({ secretId, secretKey, payload, timestamp });
+  const tcResp = await fetch(`https://${TTS_HOST}/`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'X-TC-Action': TTS_ACTION,
+      'X-TC-Version': TTS_VERSION,
+      'X-TC-Timestamp': String(timestamp),
+      'X-TC-Region': TTS_REGION,
+      Authorization: authorization
+    },
+    body: payload
+  });
+  const data = await tcResp.json().catch(() => null);
+  if (!data) throw new Error('腾讯云返回内容解析失败');
+  if (data.Response?.Error) {
+    const err = new Error(data.Response.Error.Message || '腾讯云语音合成失败');
+    err.code = data.Response.Error.Code;
+    throw err;
+  }
+  if (!data.Response?.Audio) throw new Error('腾讯云语音合成未返回音频数据');
+  return data.Response.Audio;
+}
+function ttsCacheKeyFor(text, voiceType, speed) {
+  const hash = crypto.createHash('sha1').update(`${voiceType}|${speed.toFixed(2)}|${text}`).digest('hex');
+  return `${TTS_CACHE_DIR}/${hash}.mp3`;
+}
+function ttsCosGetObject(Key) {
+  return new Promise(resolve => {
+    if (!cosClient) return resolve(null);
+    cosClient.getObject({ Bucket: COS_BUCKET, Region: COS_REGION, Key }, (err, data) => {
+      if (err || !data?.Body) return resolve(null);
+      resolve(Buffer.isBuffer(data.Body) ? data.Body : Buffer.from(data.Body));
+    });
+  });
+}
+function ttsCosPutObject(Key, Body) {
+  return new Promise(resolve => {
+    if (!cosClient) return resolve(false);
+    cosClient.putObject({ Bucket: COS_BUCKET, Region: COS_REGION, Key, Body, ContentType: 'audio/mpeg' }, err => resolve(!err));
+  });
+}
+const ttsRateBucket = new Map();
+function ttsTooFrequent(key, limit = 6, windowMs = 1000) {
+  const now = Date.now();
+  const arr = (ttsRateBucket.get(key) || []).filter(t => now - t < windowMs);
+  arr.push(now);
+  ttsRateBucket.set(key, arr);
+  return arr.length > limit;
+}
+
 function sendCosConfigError(res) {
   return res.status(503).json({
     error: 'COS 未配置：请在 .env 中填写 COS_SECRET_ID 与 COS_SECRET_KEY（腾讯云控制台 → 访问管理 → API 密钥管理），然后重启服务'
@@ -689,6 +790,53 @@ app.post('/api/images/delete', authenticate, async (req, res) => {
   } catch (error) {
     console.error('COS 删除失败:', error);
     res.status(500).json({ error: '图片删除失败：' + (error.message || '未知错误') });
+  }
+});
+
+/* =====================================================================
+   V9 语音朗读优化：腾讯云 TTS 代理接口。
+   默认英语男声、国内网络环境稳定访问；密钥只从环境变量读取，绝不下发前端。
+   ===================================================================== */
+app.post('/api/tts', authenticate, async (req, res) => {
+  const secretId = process.env.TENCENT_TTS_SECRET_ID;
+  const secretKey = process.env.TENCENT_TTS_SECRET_KEY;
+  if (!secretId || !secretKey) {
+    return res.status(503).json({
+      error: '腾讯云 TTS 未配置：请在 .env 中填写 TENCENT_TTS_SECRET_ID 与 TENCENT_TTS_SECRET_KEY（以及可选的 TENCENT_TTS_APP_ID），然后重启服务'
+    });
+  }
+  try {
+    if (ttsTooFrequent(`u${req.user.id}`)) {
+      return res.status(429).json({ error: '请求过于频繁，请稍候再试' });
+    }
+    const text = String(req.body.text || '').trim();
+    if (!text) return res.status(400).json({ error: '缺少 text 参数' });
+    if (text.length > TTS_MAX_CHARS) {
+      return res.status(400).json({ error: `文本过长，单次朗读最多支持 ${TTS_MAX_CHARS} 个字符，请分段传入` });
+    }
+
+    const rateInput = Number(req.body.rate);
+    const rate = Number.isFinite(rateInput) && rateInput > 0 ? rateInput : 1;
+    const speed = Math.max(-2, Math.min(6, (rate - 1) / 0.2));
+
+    const cacheKey = ttsCacheKeyFor(text, TTS_VOICE_TYPE, speed);
+    if (TTS_CACHE_ENABLED) {
+      const cached = await ttsCosGetObject(cacheKey);
+      if (cached) {
+        return res.json({ audio: `data:audio/mp3;base64,${cached.toString('base64')}`, cached: true });
+      }
+    }
+
+    const audioBase64 = await synthesizeWithTencent({ secretId, secretKey, text, speed });
+
+    if (TTS_CACHE_ENABLED) {
+      ttsCosPutObject(cacheKey, Buffer.from(audioBase64, 'base64')).catch(() => {});
+    }
+
+    res.json({ audio: `data:audio/mp3;base64,${audioBase64}` });
+  } catch (error) {
+    console.error('腾讯云 TTS 调用失败:', error);
+    res.status(502).json({ error: error.message || '腾讯云语音合成服务暂时不可用' });
   }
 });
 

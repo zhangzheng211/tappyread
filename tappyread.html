@@ -3612,8 +3612,15 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
     const clearSearchBtn = document.getElementById('clearSearchBtn');
     const stageWrap = document.querySelector('.stage-wrap');
 
+
     /* =====================================================================
-       Speech
+       Speech —— V9 语音引擎升级
+       ---------------------------------------------------------------------
+       统一朗读入口：speakText(text, indicatorEl) / speakOne(text, indicatorEl) / speakSequence(items)
+       默认：腾讯云 TTS（英语男声，走 /api/tts 代理，密钥只保存在服务端）
+       备用：浏览器 speechSynthesis（腾讯云异常、超时或未配置时自动降级）
+       原有浏览器语音逻辑完整保留在 speakOneBrowser / speakSequenceBrowser 中，
+       作为降级目标，不改变原有稳定性修复（看门狗、心跳检测、重试等）。
        ===================================================================== */
     let voices = [];
     let speechSessionId = 0;
@@ -3657,36 +3664,149 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
         return utter;
     }
 
-    // Chrome 的 speechSynthesis 偶发会在 cancel/speak 连续调用、后台切换或系统休眠后
-    // 卡在 speaking/paused 状态。关键修复：不再每 6 秒强制 pause/resume（这会反过来
-    // 干扰正常朗读），而是只在“准备开始”和“页面重新可见”时 resume，并用看门狗检测
-    // 完全没有事件回调的静默失败。
-    const SPEECH_PRE_SPEAK_DELAY = 80;
-    const SPEECH_START_TIMEOUT = 4500;
-    const SPEECH_MAX_RETRIES = 1;
+    /* ---------------------------------------------------------------------
+       腾讯云 TTS 层
+       - /api/tts 由服务端代理调用腾讯云语音合成（密钥不落前端）
+       - 内存缓存：同一段文本 + 语速重复朗读时直接复用，提升"连续点击"体验
+       - 连续失败达到阈值后短暂进入"冷却期"，冷却期内直接走本地语音，
+         避免每次点击都先等待一次超时才降级，保证浏览体验流畅
+       --------------------------------------------------------------------- */
+    const TTS_CHUNK_MAX_CHARS = 400;      // 低于腾讯云单次请求硬上限（约500字母），为标点/换行留余量
+    const TTS_CACHE_MAX_ENTRIES = 200;    // 内存音频缓存条数上限（简单 FIFO 淘汰）
+    const TTS_FAIL_STREAK_LIMIT = 2;      // 连续失败次数达到该值后进入冷却
+    const TTS_COOLDOWN_MS = 60000;        // 冷却时长：1 分钟内直接使用本地语音
+
+    const ttsAudioCache = new Map();
+    let ttsAbortController = null;
+    let ttsAudio = null;
+    let ttsFailStreak = 0;
+    let ttsCooldownUntil = 0;
+
+    function tencentTtsUsable(){
+        return Date.now() >= ttsCooldownUntil;
+    }
+    function registerTtsSuccess(){
+        ttsFailStreak = 0;
+        ttsCooldownUntil = 0;
+    }
+    function registerTtsFailure(){
+        ttsFailStreak += 1;
+        if(ttsFailStreak >= TTS_FAIL_STREAK_LIMIT){
+            ttsCooldownUntil = Date.now() + TTS_COOLDOWN_MS;
+        }
+    }
+
+    function ttsCacheGet(key){ return ttsAudioCache.get(key); }
+    function ttsCacheSet(key, value){
+        if(ttsAudioCache.size >= TTS_CACHE_MAX_ENTRIES){
+            const firstKey = ttsAudioCache.keys().next().value;
+            ttsAudioCache.delete(firstKey);
+        }
+        ttsAudioCache.set(key, value);
+    }
+
+    // 把一段可能很长的文本切成若干段，尽量在句子边界切分，
+    // 避免腾讯云单次请求超限，也避免把一句话从中间截断导致断句突兀
+    function splitTextForTencentTts(text){
+        const raw = String(text || '').trim();
+        if(!raw) return [];
+        if(raw.length <= TTS_CHUNK_MAX_CHARS) return [raw];
+        const sentences = raw.split(/(?<=[.!?。！？\n])\s*/).filter(Boolean);
+        const chunks = [];
+        let buf = '';
+        sentences.forEach(sentence => {
+            if(buf && (buf.length + sentence.length) > TTS_CHUNK_MAX_CHARS){
+                chunks.push(buf.trim());
+                buf = '';
+            }
+            buf += sentence;
+            while(buf.length > TTS_CHUNK_MAX_CHARS){
+                chunks.push(buf.slice(0, TTS_CHUNK_MAX_CHARS).trim());
+                buf = buf.slice(TTS_CHUNK_MAX_CHARS);
+            }
+        });
+        if(buf.trim()) chunks.push(buf.trim());
+        return chunks.length ? chunks : [raw.slice(0, TTS_CHUNK_MAX_CHARS)];
+    }
+
+    async function fetchTencentAudioChunk(text, rate, signal){
+        const cacheKey = `${rate.toFixed(2)}||${text}`;
+        const cached = ttsCacheGet(cacheKey);
+        if(cached) return cached;
+        const headers = { 'Content-Type': 'application/json; charset=utf-8' };
+        if(typeof __authToken !== 'undefined' && __authToken) headers.Authorization = 'Bearer ' + __authToken;
+        const resp = await fetch('/api/tts', {
+            method: 'POST',
+            headers,
+            credentials: 'include',
+            body: JSON.stringify({ text, rate }),
+            signal
+        });
+        let data = null;
+        try { data = await resp.json(); } catch(error) {}
+        if(!resp.ok || !data || !data.audio){
+            throw new Error((data && data.error) || `腾讯云 TTS 请求失败（HTTP ${resp.status}）`);
+        }
+        ttsCacheSet(cacheKey, data.audio);
+        return data.audio;
+    }
+
+    function stopTencentAudio(){
+        if(ttsAbortController){
+            try { ttsAbortController.abort(); } catch(error) {}
+            ttsAbortController = null;
+        }
+        if(ttsAudio){
+            try { ttsAudio.onended = null; ttsAudio.onerror = null; ttsAudio.pause(); ttsAudio.src = ''; } catch(error) {}
+            ttsAudio = null;
+        }
+    }
+
+    // 依次播放一组已经合成好的音频（同一句/同一页的分段），
+    // token 用于在播放过程中被新的朗读请求打断时及时停止
+    function playTencentAudioSequence(audioUrls, token){
+        return new Promise((resolve, reject) => {
+            let index = 0;
+            const playNext = () => {
+                if(token !== speechSessionId) return resolve();
+                if(index >= audioUrls.length) return resolve();
+                const audio = new Audio(audioUrls[index++]);
+                ttsAudio = audio;
+                audio.onended = () => { if(token === speechSessionId) playNext(); else resolve(); };
+                audio.onerror = () => { reject(new Error('腾讯云音频播放失败')); };
+                audio.play().catch(reject);
+            };
+            playNext();
+        });
+    }
 
     function clearSpeechIndicator(el){
         if(el) el.classList.remove('speaking');
     }
 
+    // 停止当前朗读（不区分引擎）：腾讯云音频 + 浏览器 speechSynthesis 都会被清理
     function stopSpeechSoft(){
         isSpeaking = false;
         currentUtterance = null;
         currentIndicatorEl = null;
+        stopTencentAudio();
         if('speechSynthesis' in window){
             try { speechSynthesis.cancel(); } catch(error) {}
             try { speechSynthesis.resume(); } catch(error) {}
         }
     }
 
-    // 手动恢复浏览器语音引擎。Chrome speechSynthesis 长时间运行后偶发进入假死状态，
-    // 该操作不会改变朗读配置，只重新初始化播放管线。
+    // "重置语音"按钮：停止当前播放、清理腾讯云/浏览器两套引擎的异常状态、
+    // 重新初始化，并解除腾讯云冷却（避免用户已经手动处理网络问题后仍被冷却卡住）
     function resetSpeechEngine(){
         speechSessionId++;
         isSpeaking = false;
         currentUtterance = null;
         if(currentIndicatorEl) clearSpeechIndicator(currentIndicatorEl);
         currentIndicatorEl = null;
+        stopTencentAudio();
+        ttsFailStreak = 0;
+        ttsCooldownUntil = 0;
         if('speechSynthesis' in window){
             try { speechSynthesis.cancel(); } catch(e) {}
             try { speechSynthesis.resume(); } catch(e) {}
@@ -3719,7 +3839,14 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
         }, 4000);
     }
 
-    function speakOne(text, indicatorEl, retryCount = 0) {
+    // 手动恢复浏览器语音引擎。Chrome speechSynthesis 长时间运行后偶发进入假死状态，
+    // 该操作不会改变朗读配置，只重新初始化播放管线。
+    const SPEECH_PRE_SPEAK_DELAY = 80;
+    const SPEECH_START_TIMEOUT = 4500;
+    const SPEECH_MAX_RETRIES = 1;
+
+    // ===== 原有浏览器 speechSynthesis 朗读实现（降级目标，逻辑保持不变） =====
+    function speakOneBrowser(text, indicatorEl, retryCount = 0) {
         if(!('speechSynthesis' in window) || !String(text || '').trim()) return;
 
         // 再点同一个正在朗读的按钮 = 停止；点其他内容 = 切换到新内容。
@@ -3769,13 +3896,13 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
                 clearSpeechIndicator(indicatorEl);
                 try { speechSynthesis.cancel(); } catch(error) {}
                 if(retryCount < SPEECH_MAX_RETRIES){
-                    setTimeout(() => speakOne(text, indicatorEl, retryCount + 1), 120);
+                    setTimeout(() => speakOneBrowser(text, indicatorEl, retryCount + 1), 120);
                 }
             };
 
             const watchdog = setTimeout(() => {
                 if(token !== speechSessionId || settled) return;
-                // 只有“从未收到 onstart”才自动重试；正常长句不受影响。
+                // 只有"从未收到 onstart"才自动重试；正常长句不受影响。
                 if(!started) retry();
                 else finish();
             }, SPEECH_START_TIMEOUT);
@@ -3815,7 +3942,7 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
         }, SPEECH_PRE_SPEAK_DELAY);
     }
 
-    function speakSequence(items){
+    function speakSequenceBrowser(items){
         if(!('speechSynthesis' in window) || !items.length) return;
         const token = ++speechSessionId;
         stopSpeechSoft();
@@ -3886,7 +4013,7 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
                         started = true;
                         clearTimeout(watchdog);
                         if(indicatorEl) indicatorEl.classList.add('speaking');
-                        // 🆕 心跳检测：跟 speakOne 同理，防止长句子被引擎静默截断后
+                        // 🆕 心跳检测：跟 speakOneBrowser 同理，防止长句子被引擎静默截断后
                         // 卡住，导致整段自动朗读停在半路、之后的页不再继续读。
                         heartbeat = setInterval(() => {
                             if(settled || token !== speechSessionId){ clearInterval(heartbeat); return; }
@@ -3926,6 +4053,134 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
         };
         next();
     }
+
+    /* ---------------------------------------------------------------------
+       统一朗读入口（对外 API，保持与原来相同的调用方式，调用方无需改动）：
+         speakText(text, indicatorEl)      —— 新增的语义化别名
+         speakOne(text, indicatorEl)       —— 单段朗读（点读、选中朗读等）
+         speakSequence(items)              —— 连续朗读（整页 / 自动翻页）
+       流程：优先腾讯云 TTS（国内网络稳定 + 英语男声）→ 失败/超时/未配置
+             自动降级为浏览器 speechSynthesis，功能与体验对调用方完全透明。
+       --------------------------------------------------------------------- */
+    function speakOne(text, indicatorEl){
+        const clean = String(text || '').trim();
+        if(!clean) return;
+
+        // 再点同一个正在朗读的按钮 = 停止；点其他内容 = 切换到新内容。
+        if(isSpeaking && indicatorEl && currentIndicatorEl === indicatorEl){
+            ++speechSessionId;
+            stopSpeechSoft();
+            clearSpeechIndicator(indicatorEl);
+            return;
+        }
+
+        const token = ++speechSessionId;
+        const previousIndicator = currentIndicatorEl;
+        stopSpeechSoft();
+        if(previousIndicator) clearSpeechIndicator(previousIndicator);
+        clearSpeechIndicator(indicatorEl);
+
+        if(!tencentTtsUsable()){
+            speakOneBrowser(clean, indicatorEl, 0);
+            return;
+        }
+
+        isSpeaking = true;
+        currentIndicatorEl = indicatorEl || null;
+        if(indicatorEl) indicatorEl.classList.add('speaking');
+
+        const rate = parseFloat(rateRange.value) || 0.8;
+        const chunks = splitTextForTencentTts(clean);
+        ttsAbortController = new AbortController();
+        const signal = ttsAbortController.signal;
+
+        Promise.all(chunks.map(chunk => fetchTencentAudioChunk(chunk, rate, signal)))
+            .then(audioUrls => {
+                if(token !== speechSessionId) return null;
+                registerTtsSuccess();
+                return playTencentAudioSequence(audioUrls, token);
+            })
+            .then(result => {
+                if(result === null || token !== speechSessionId) return;
+                isSpeaking = false;
+                currentUtterance = null;
+                clearSpeechIndicator(indicatorEl);
+                currentIndicatorEl = null;
+            })
+            .catch(error => {
+                if(token !== speechSessionId) return; // 已被新的朗读请求取代，无需降级
+                if(error?.name === 'AbortError') return; // 主动取消，不降级
+                console.warn('腾讯云 TTS 不可用，自动降级为浏览器本地语音：', error?.message || error);
+                registerTtsFailure();
+                isSpeaking = false;
+                currentIndicatorEl = null;
+                clearSpeechIndicator(indicatorEl);
+                speakOneBrowser(clean, indicatorEl, 0);
+            });
+    }
+
+    function speakSequence(items){
+        const validItems = (items || []).filter(item => String(item?.text || '').trim());
+        if(!validItems.length) return;
+
+        if(!tencentTtsUsable()){
+            speakSequenceBrowser(items);
+            return;
+        }
+
+        const token = ++speechSessionId;
+        stopSpeechSoft();
+
+        const rate = parseFloat(rateRange.value) || 0.8;
+        ttsAbortController = new AbortController();
+        const signal = ttsAbortController.signal;
+
+        // 逐项预合成（每项内部可能因长文本再切成多段），全部就绪后再连续播放，
+        // 避免朗读中途因为下一段还没合成好而出现明显停顿
+        const preparePromise = Promise.all(validItems.map(item => {
+            const chunks = splitTextForTencentTts(item.text);
+            return Promise.all(chunks.map(chunk => fetchTencentAudioChunk(chunk, rate, signal)))
+                .then(audioUrls => ({ indicatorEl: item.indicatorEl, audioUrls }));
+        }));
+
+        preparePromise
+            .then(async prepared => {
+                if(token !== speechSessionId) return null;
+                registerTtsSuccess();
+                isSpeaking = true;
+                for(const { indicatorEl, audioUrls } of prepared){
+                    if(token !== speechSessionId) return null;
+                    if(currentIndicatorEl) clearSpeechIndicator(currentIndicatorEl);
+                    currentIndicatorEl = indicatorEl || null;
+                    if(indicatorEl) indicatorEl.classList.add('speaking');
+                    await playTencentAudioSequence(audioUrls, token);
+                }
+                return true;
+            })
+            .then(result => {
+                if(result === null || token !== speechSessionId) return;
+                isSpeaking = false;
+                currentUtterance = null;
+                if(currentIndicatorEl) clearSpeechIndicator(currentIndicatorEl);
+                currentIndicatorEl = null;
+            })
+            .catch(error => {
+                if(token !== speechSessionId) return;
+                if(error?.name === 'AbortError') return;
+                console.warn('腾讯云 TTS 连续朗读失败，自动降级为浏览器本地语音：', error?.message || error);
+                registerTtsFailure();
+                isSpeaking = false;
+                if(currentIndicatorEl) clearSpeechIndicator(currentIndicatorEl);
+                currentIndicatorEl = null;
+                speakSequenceBrowser(items);
+            });
+    }
+
+    // V9 需求文档中的统一朗读入口命名：speakText(text) —— 等价于 speakOne
+    function speakText(text, indicatorEl){
+        return speakOne(text, indicatorEl);
+    }
+
 
     function ensureHtmlPointReader(html) {
         const fallbackScript = `<script data-tappy-point-reader="v3">(function(){
