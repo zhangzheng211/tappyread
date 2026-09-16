@@ -1,5 +1,4 @@
 import crypto from 'node:crypto';
-import COS from 'cos-nodejs-sdk-v5';
 
 import { authenticate } from './_mysql.js';
 
@@ -9,6 +8,17 @@ import { authenticate } from './_mysql.js';
    - 前端永远不接触 SecretId / SecretKey，密钥只保存在 Vercel 环境变量中
    - 默认英语男声（WeJack, VoiceType=1050），可通过环境变量覆盖
    - 可选：命中/写入腾讯云 COS 音频缓存，减少重复合成、加快重复播放
+
+   性能说明（对应"部署到 Vercel 后首次朗读较慢"问题）：
+   1. Serverless 冷启动：本文件包含的依赖越多，冷启动越慢，因此 COS SDK
+      改为按需动态 import，未开启缓存或缓存未命中时完全不加载该模块。
+   2. 数据库鉴权：authenticate() 需要建立/复用到 MySQL(TiDB) 的连接，
+      冷启动时的首次连接（尤其数据库与 Vercel 部署区域跨地域时）可能耗时
+      较长；前端已配合新增"预热"请求（{warmup:true}），会在页面打开时提前
+      触发一次鉴权+容器初始化，让真正点读时不必等待冷启动。
+   3. COS 缓存查询增加了 600ms 超时保护，避免缓存查询变慢时拖累整体响应。
+   可通过环境变量 TTS_DEBUG_TIMING=1 在服务端日志中输出各阶段耗时，便于
+   进一步排查具体是哪个环节慢。
    ===================================================================== */
 
 const TTS_HOST = 'tts.tencentcloudapi.com';
@@ -26,9 +36,27 @@ const COS_BUCKET = process.env.COS_BUCKET || 'tappyreadjpeg-1325106148';
 const COS_REGION = process.env.COS_REGION || 'ap-guangzhou';
 const TTS_CACHE_DIR = (process.env.TENCENT_TTS_CACHE_DIR || 'audio').replace(/\/+$/, '');
 const TTS_CACHE_ENABLED = Boolean(process.env.COS_SECRET_ID && process.env.COS_SECRET_KEY) && process.env.TENCENT_TTS_CACHE !== '0';
-const cosClient = TTS_CACHE_ENABLED
-  ? new COS({ SecretId: process.env.COS_SECRET_ID, SecretKey: process.env.COS_SECRET_KEY, Timeout: 4000 })
-  : null;
+const TTS_CACHE_LOOKUP_TIMEOUT_MS = 600; // 缓存查询超时保护，避免拖慢整体响应
+const DEBUG_TIMING = process.env.TTS_DEBUG_TIMING === '1';
+
+let cosClientPromise = null;
+// 懒加载：只有真正需要读/写缓存时才会 import COS SDK，减少非缓存场景下的冷启动体积
+function getCosClient() {
+  if (!TTS_CACHE_ENABLED) return Promise.resolve(null);
+  if (!cosClientPromise) {
+    cosClientPromise = import('cos-nodejs-sdk-v5').then(({ default: COS }) => {
+      return new COS({ SecretId: process.env.COS_SECRET_ID, SecretKey: process.env.COS_SECRET_KEY, Timeout: 4000 });
+    });
+  }
+  return cosClientPromise;
+}
+
+function withTimeout(promise, ms, fallbackValue) {
+  return Promise.race([
+    promise,
+    new Promise(resolve => setTimeout(() => resolve(fallbackValue), ms))
+  ]);
+}
 
 function sendJson(res, status, body) {
   res.status(status).setHeader('Content-Type', 'application/json; charset=utf-8').end(JSON.stringify(body));
@@ -75,19 +103,24 @@ function cacheKeyFor(text, voiceType, speed) {
   return `${TTS_CACHE_DIR}/${hash}.mp3`;
 }
 
-function cosGetObject(Key) {
-  return new Promise(resolve => {
-    if (!cosClient) return resolve(null);
+async function cosGetObject(Key) {
+  const cosClient = await getCosClient();
+  if (!cosClient) return null;
+  const lookup = new Promise(resolve => {
     cosClient.getObject({ Bucket: COS_BUCKET, Region: COS_REGION, Key }, (err, data) => {
       if (err || !data?.Body) return resolve(null);
       resolve(Buffer.isBuffer(data.Body) ? data.Body : Buffer.from(data.Body));
     });
   });
+  // 缓存查询设置超时兜底：查询变慢时直接当作未命中处理，改走腾讯云实时合成，
+  // 避免"缓存本该更快"反而拖慢了整体响应时间
+  return withTimeout(lookup, TTS_CACHE_LOOKUP_TIMEOUT_MS, null);
 }
 
-function cosPutObject(Key, Body) {
+async function cosPutObject(Key, Body) {
+  const cosClient = await getCosClient();
+  if (!cosClient) return false;
   return new Promise(resolve => {
-    if (!cosClient) return resolve(false);
     cosClient.putObject({ Bucket: COS_BUCKET, Region: COS_REGION, Key, Body, ContentType: 'audio/mpeg' }, err => {
       resolve(!err);
     });
@@ -146,9 +179,17 @@ export default async function handler(req, res) {
     });
   }
 
+  const t0 = Date.now();
   try {
     const user = await authenticate(req);
+    if (DEBUG_TIMING) console.log(`[tts] authenticate 耗时 ${Date.now() - t0}ms`);
     if (!user) return sendJson(res, 401, { error: '未登录或登录已过期' });
+
+    // 预热请求：只走鉴权 + 建立数据库连接，不调用腾讯云，用于页面打开时提前
+    // "叫醒"这个函数所在的容器，避免用户第一次点读时才承受冷启动耗时。
+    if (req.body?.warmup) {
+      return sendJson(res, 200, { warmed: true });
+    }
 
     if (tooFrequent(`u${user.id}`)) {
       return sendJson(res, 429, { error: '请求过于频繁，请稍候再试' });
@@ -168,19 +209,25 @@ export default async function handler(req, res) {
 
     const cacheKey = cacheKeyFor(text, TTS_VOICE_TYPE, speed);
     if (TTS_CACHE_ENABLED) {
+      const tCache = Date.now();
       const cached = await cosGetObject(cacheKey);
+      if (DEBUG_TIMING) console.log(`[tts] COS 缓存查询耗时 ${Date.now() - tCache}ms，命中=${!!cached}`);
       if (cached) {
+        if (DEBUG_TIMING) console.log(`[tts] 总耗时 ${Date.now() - t0}ms（缓存命中）`);
         return sendJson(res, 200, { audio: `data:audio/mp3;base64,${cached.toString('base64')}`, cached: true });
       }
     }
 
+    const tTencent = Date.now();
     const audioBase64 = await synthesizeWithTencent({ secretId, secretKey, text, speed });
+    if (DEBUG_TIMING) console.log(`[tts] 腾讯云合成耗时 ${Date.now() - tTencent}ms`);
 
     if (TTS_CACHE_ENABLED) {
       // 缓存写入不阻塞响应，失败也不影响本次播放
       cosPutObject(cacheKey, Buffer.from(audioBase64, 'base64')).catch(() => {});
     }
 
+    if (DEBUG_TIMING) console.log(`[tts] 总耗时 ${Date.now() - t0}ms`);
     return sendJson(res, 200, { audio: `data:audio/mp3;base64,${audioBase64}` });
   } catch (error) {
     console.error('Vercel tts error:', error);

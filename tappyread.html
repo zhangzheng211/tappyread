@@ -3628,6 +3628,12 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
     let currentUtterance = null;
     let currentIndicatorEl = null;
 
+    // "音色"下拉框第一项固定为腾讯云 TTS：选中它才会尝试腾讯云朗读，
+    // 选择其他任意浏览器语音时，完全按原来的 speechSynthesis 方式朗读（不请求 /api/tts）。
+    const TENCENT_VOICE_OPTION_VALUE = '__tencent_tts__';
+    const VOICE_PREF_STORAGE_KEY = 'tappyread_voice_pref';
+    let bestBrowserVoiceName = ''; // 腾讯云朗读失败自动降级时使用的默认浏览器音色
+
     function loadVoices(){
         if(!('speechSynthesis' in window)) return;
         voices = speechSynthesis.getVoices();
@@ -3641,23 +3647,48 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
             return score;
         };
         const sorted = voices.slice().sort((a,b) => rank(b) - rank(a));
+        bestBrowserVoiceName = sorted[0]?.name || '';
+
+        // 重新构建下拉框时，尽量保留用户当前已经选中的项，避免 voiceschanged
+        // 重复触发（部分浏览器会触发多次）把用户手动选择的音色又重置掉。
+        const previousValue = voiceSelect.value;
+
         voiceSelect.innerHTML = '';
+        const tencentOpt = document.createElement('option');
+        tencentOpt.value = TENCENT_VOICE_OPTION_VALUE;
+        tencentOpt.textContent = '腾讯云 TTS 英语男声（推荐）';
+        voiceSelect.appendChild(tencentOpt);
         sorted.forEach(v => {
             const opt = document.createElement('option');
             opt.value = v.name;
             opt.textContent = `${v.name} (${v.lang})`;
             voiceSelect.appendChild(opt);
         });
-        if(sorted.length) voiceSelect.value = sorted[0].name;
+
+        const optionValues = Array.from(voiceSelect.options).map(o => o.value);
+        const storedPref = localStorage.getItem(VOICE_PREF_STORAGE_KEY);
+        if(previousValue && optionValues.includes(previousValue)){
+            voiceSelect.value = previousValue;
+        } else if(storedPref && optionValues.includes(storedPref)){
+            voiceSelect.value = storedPref;
+        } else {
+            voiceSelect.value = TENCENT_VOICE_OPTION_VALUE; // 默认使用腾讯云 TTS
+        }
     }
     if('speechSynthesis' in window){
         loadVoices();
         speechSynthesis.addEventListener?.('voiceschanged', loadVoices);
     }
+    voiceSelect.addEventListener('change', () => {
+        localStorage.setItem(VOICE_PREF_STORAGE_KEY, voiceSelect.value);
+    });
 
     function makeUtterance(text){
         const utter = new SpeechSynthesisUtterance(String(text || ''));
-        const chosen = voices.find(v => v.name === voiceSelect.value);
+        // 选中"腾讯云 TTS"时若走到这里，说明是腾讯云朗读失败后的降级播放，
+        // 此时没有对应的浏览器音色可用，改用系统里评分最高的英语男声作为兜底。
+        const selectedName = voiceSelect.value === TENCENT_VOICE_OPTION_VALUE ? bestBrowserVoiceName : voiceSelect.value;
+        const chosen = voices.find(v => v.name === selectedName);
         if(chosen) utter.voice = chosen;
         utter.rate = parseFloat(rateRange.value) || 0.8;
         utter.pitch = 0.92;
@@ -3683,6 +3714,9 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
     let ttsCooldownUntil = 0;
 
     function tencentTtsUsable(){
+        // 只有下拉框选中"腾讯云 TTS 英语男声"时才走腾讯云；用户选择了其他浏览器
+        // 音色，则完全按原来的方式朗读，不请求 /api/tts、不受冷却期影响。
+        if(voiceSelect.value !== TENCENT_VOICE_OPTION_VALUE) return false;
         return Date.now() >= ttsCooldownUntil;
     }
     function registerTtsSuccess(){
@@ -3749,6 +3783,33 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
         }
         ttsCacheSet(cacheKey, data.audio);
         return data.audio;
+    }
+
+    /* ---------------------------------------------------------------------
+       预热腾讯云 TTS 通道
+       ---------------------------------------------------------------------
+       Vercel 上的 /api/tts 是独立的 Serverless 函数，长时间没有请求后容器会
+       休眠，下一次调用需要重新冷启动 + 建立数据库连接，导致"第一次点读要等
+       好几秒"。这里在页面打开后先发一次 {warmup:true} 的轻量请求，只做鉴权
+       和数据库连接（不会调用腾讯云、不计入朗读次数），提前把容器"叫醒"；
+       之后每隔几分钟趁用户还在阅读再发一次，避免容器中途又被回收。
+       --------------------------------------------------------------------- */
+    const TTS_WARMUP_INTERVAL_MS = 4 * 60 * 1000;
+    function warmupTencentTts(){
+        if(typeof __authToken === 'undefined' || !__authToken) return;
+        const headers = { 'Content-Type': 'application/json; charset=utf-8', Authorization: 'Bearer ' + __authToken };
+        fetch('/api/tts', {
+            method: 'POST',
+            headers,
+            credentials: 'include',
+            body: JSON.stringify({ warmup: true })
+        }).catch(() => {}); // 预热失败静默忽略，不影响正常朗读（正常朗读会自己走完整的失败降级流程）
+    }
+    if(typeof __authToken !== 'undefined' && __authToken){
+        setTimeout(warmupTencentTts, 800); // 稍微延后，避免和页面其它初始化请求抢带宽
+        setInterval(() => {
+            if(document.visibilityState === 'visible') warmupTencentTts();
+        }, TTS_WARMUP_INTERVAL_MS);
     }
 
     function stopTencentAudio(){

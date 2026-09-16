@@ -806,6 +806,13 @@ app.post('/api/tts', authenticate, async (req, res) => {
     });
   }
   try {
+    // 预热请求：前端页面打开时会发一次 {warmup:true}，只为提前"叫醒"进程/
+    // 建立数据库连接，不实际调用腾讯云，本地开发环境下基本无感知，但保持
+    // 与 Vercel 版接口行为一致，避免前端两套环境要分别判断。
+    if (req.body.warmup) {
+      return res.json({ warmed: true });
+    }
+
     if (ttsTooFrequent(`u${req.user.id}`)) {
       return res.status(429).json({ error: '请求过于频繁，请稍候再试' });
     }
