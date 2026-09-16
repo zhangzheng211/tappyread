@@ -375,7 +375,7 @@
         </div>
 
         <div class="helper-row">
-            <label class="remember"><input type="checkbox" id="rememberUser"> 记住账号</label>
+            <label class="remember"><input type="checkbox" id="rememberUser"> 记住用户名和密码</label>
         </div>
         <!-- <div class="footer-note">
             体验用户名：test&nbsp;&nbsp;&nbsp;&nbsp;密码：123456
@@ -409,6 +409,20 @@
             const REDIRECT_URL = 'tappyread.html';
             const API_BASE = '/api';
             const AUTH_TOKEN_KEY = 'tappyread_auth_token';
+            const LAST_USER_KEY = 'tappyread_last_user';
+            // 「记住账号密码」：密码使用简单的 Base64 编码后存在浏览器本地 localStorage 中，
+            // 仅用于方便下次打开页面时自动填回输入框，并不是真正的加密保护——
+            // 任何能打开浏览器开发者工具的人都能还原出明文密码，因此只建议在
+            // 自己的私人设备上勾选，不要在公用/共享设备上使用。
+            const LAST_PASS_KEY = 'tappyread_last_pass';
+            function encodePass(str) {
+                try { return btoa(unescape(encodeURIComponent(str))); }
+                catch (error) { return ''; }
+            }
+            function decodePass(str) {
+                try { return decodeURIComponent(escape(atob(str))); }
+                catch (error) { return ''; }
+            }
             const registerBtn = document.getElementById('registerBtn');
             let isSubmitting = false;
 
@@ -495,9 +509,11 @@
                 if (loginData.username) localStorage.setItem('tappyread_username', loginData.username);
 
                 if (rememberUser.checked) {
-                    localStorage.setItem('tappyread_last_user', username);
+                    localStorage.setItem(LAST_USER_KEY, username);
+                    localStorage.setItem(LAST_PASS_KEY, encodePass(password));
                 } else {
-                    localStorage.removeItem('tappyread_last_user');
+                    localStorage.removeItem(LAST_USER_KEY);
+                    localStorage.removeItem(LAST_PASS_KEY);
                 }
 
                 setError('✅ 登录成功，正在跳转...', true);
@@ -520,7 +536,8 @@
                     // 保存当前登录用户名与用户 ID：绘本目录等数据按用户 ID 隔离存储，账户信息必须显示当前登录用户
                     if (data.userId) localStorage.setItem('tappyread_user_id', data.userId);
                     if (data.username) localStorage.setItem('tappyread_username', data.username);
-                    localStorage.setItem('tappyread_last_user', username);
+                    localStorage.setItem(LAST_USER_KEY, username);
+                    localStorage.setItem(LAST_PASS_KEY, encodePass(password));
                     rememberUser.checked = true;
                     setError('✅ 注册成功，正在进入首页...', true);
                     setTimeout(redirectToMainPage, 400);
@@ -532,10 +549,15 @@
                 }
             }
 
-            const savedUser = localStorage.getItem('tappyread_last_user');
+            const savedUser = localStorage.getItem(LAST_USER_KEY);
+            const savedPass = localStorage.getItem(LAST_PASS_KEY);
             if (savedUser) {
                 usernameInput.value = savedUser;
                 rememberUser.checked = true;
+            }
+            if (savedPass) {
+                const decoded = decodePass(savedPass);
+                if (decoded) passwordInput.value = decoded;
             }
 
             loginBtn.addEventListener('click', handleLogin);
