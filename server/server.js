@@ -62,6 +62,8 @@ const TTS_ACTION = 'TextToVoice';
 const TTS_REGION = process.env.TENCENT_TTS_REGION || 'ap-guangzhou';
 // 1050 = WeJack，腾讯云标准音色英语男声；如已开通精品/大模型音色可用环境变量覆盖
 const TTS_VOICE_TYPE = Number(process.env.TENCENT_TTS_VOICE_TYPE || 1050);
+// 音量：范围 [-10, 10]，默认调高到 8（原来是 0，即腾讯云的默认音量，偏小）。
+const TTS_VOLUME = Math.max(-10, Math.min(10, Number(process.env.TENCENT_TTS_VOLUME ?? 8)));
 const TTS_MAX_CHARS = 500;
 const TTS_CACHE_DIR = (process.env.TENCENT_TTS_CACHE_DIR || 'audio').replace(/\/+$/, '');
 const TTS_CACHE_ENABLED = cosConfigured && process.env.TENCENT_TTS_CACHE !== '0';
@@ -91,7 +93,7 @@ async function synthesizeWithTencent({ secretId, secretKey, text, speed }) {
   const payload = JSON.stringify({
     Text: text,
     SessionId: sessionId,
-    Volume: 0,
+    Volume: TTS_VOLUME,
     Speed: Number(speed.toFixed(2)),
     ProjectId: 0,
     ModelType: 1,

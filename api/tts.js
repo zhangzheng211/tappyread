@@ -29,6 +29,9 @@ const TTS_REGION = process.env.TENCENT_TTS_REGION || 'ap-guangzhou';
 // 默认 1050 = WeJack，腾讯云标准音色英语男声，账号无需额外开通即可使用。
 // 如已开通精品/大模型音色，可在环境变量中改为 101050(WeJack 精品) 或 501008(WeJames 大模型) 等。
 const TTS_VOICE_TYPE = Number(process.env.TENCENT_TTS_VOICE_TYPE || 1050);
+// 音量：范围 [-10, 10]，0 为腾讯云默认音量（偏小，是"声音有点小"反馈的直接原因）。
+// 默认调高到 8（接近上限但留一点余量避免削波失真），可通过 TENCENT_TTS_VOLUME 微调。
+const TTS_VOLUME = Math.max(-10, Math.min(10, Number(process.env.TENCENT_TTS_VOLUME ?? 8)));
 const TTS_MAX_CHARS = 500; // 腾讯云英文单次请求最大约 500 个字母，前端已按句切分，这里再兜底一次
 
 // COS 音频缓存（可选）：复用现有 COS 配置，未配置则自动跳过缓存，不影响主流程
@@ -133,7 +136,7 @@ async function synthesizeWithTencent({ secretId, secretKey, text, speed }) {
   const payload = JSON.stringify({
     Text: text,
     SessionId: sessionId,
-    Volume: 0,
+    Volume: TTS_VOLUME,
     Speed: Number(speed.toFixed(2)),
     ProjectId: 0,
     ModelType: 1,

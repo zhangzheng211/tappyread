@@ -149,13 +149,14 @@ tappyread.html  →  speakText(text) / speakOne(text) / speakSequence(items)
 | `TENCENT_TTS_SECRET_ID` / `TENCENT_TTS_SECRET_KEY` | 腾讯云 API 密钥（控制台 → 访问管理 CAM → API 密钥管理）。**必填**，否则 `/api/tts` 返回 503 |
 | `TENCENT_TTS_APP_ID` | 语音合成应用 AppId（控制台 → 语音合成 → 应用管理），当前基础合成接口不强制使用，预留给后续长文本异步合成等扩展 |
 
-可选高级配置（不填使用默认值）：`TENCENT_TTS_REGION`（默认 `ap-guangzhou`）、`TENCENT_TTS_VOICE_TYPE`（默认 `1050`=WeJack 英文男声标准音色）、`TENCENT_TTS_CACHE`（默认开启，填 `0` 关闭 COS 缓存）、`TENCENT_TTS_CACHE_DIR`（默认 `audio`）。
+可选高级配置（不填使用默认值）：`TENCENT_TTS_REGION`（默认 `ap-guangzhou`）、`TENCENT_TTS_VOICE_TYPE`（默认 `1050`=WeJack 英文男声标准音色）、`TENCENT_TTS_VOLUME`（默认 `8`，范围 -10~10，数值越大越响）、`TENCENT_TTS_CACHE`（默认开启，填 `0` 关闭 COS 缓存）、`TENCENT_TTS_CACHE_DIR`（默认 `audio`）。
 
 > 开通语音合成服务：[腾讯云控制台 → 语音合成 TTS](https://console.cloud.tencent.com/tts) → 新建应用即可获得 AppId；密钥与 COS 共用同一套「访问管理 CAM → API 密钥管理」，也可以单独为 TTS 创建一组子账号密钥并只授予 `QcloudTTSFullAccess` 权限，遵循最小权限原则。
 
-### 4. 音色与语速
+### 4. 音色、音量与语速
 
-- 默认音色：`VoiceType=1050`（WeJack，英文男声，标准音色，账号无需额外开通）。如已开通精品/大模型音色，可将 `TENCENT_TTS_VOICE_TYPE` 改为 `101050`（WeJack 精品）或 `501008`（WeJames 大模型）等，完整音色表见腾讯云文档「语音合成 → 音色列表」。
+- 默认音色：`VoiceType=1050`（WeJack，英文男声，标准音色，账号无需额外开通）。如已开通精品/大模型音色，可将 `TENCENT_TTS_VOICE_TYPE` 改为 `101050`（WeJack 精品）或 `501008`（WeJames 大模型，音质更自然清晰）等，完整音色表见腾讯云文档「语音合成 → 音色列表」。
+- **音量**：`TENCENT_TTS_VOLUME`，范围 `-10 ~ 10`，`0` 为腾讯云的默认音量（实测偏小，是"声音有点小"反馈的直接原因）。已把默认值调高到 `8`，比原始默认音量明显更响；如果觉得还不够大声或者出现了轻微失真，可以在环境变量里继续微调（`9`、`10` 更响，但失真风险也更高；调小则更保守）。修改后需要重启本地服务（`npm start`）或在 Vercel 上 Redeploy 才会生效。
 - 语速沿用页面原有的语速滑块（0.6～1.1，1.0 为正常速度），服务端按腾讯云 `Speed` 参数区间（[-2, 6]，每 0.2 倍速对应 1 档）等比换算，浏览器备用引擎与腾讯云音色的听感语速基本保持一致。
 
 ### 5. 音频缓存（可选，需要额外的 COS 权限）

@@ -4448,11 +4448,21 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
         return;
     }
 
+    // 🆕 修复"阅读绘本翻页时，左侧绘本目录突然跳回顶部/默认状态"的问题：
+    // renderTree() 每次都会 treeEl.innerHTML = '' 后重新整体拼装 DOM，这会让
+    // 浏览器把 treeEl 的滚动位置清零。翻页（上一页/下一页）时 renderAll() 会
+    // 顺带调用一次 renderTree()（为了让当前页在目录里的高亮及时跟着更新），
+    // 但翻页本身并不会改变目录结构，不应该让目录树看起来"被刷新"。这里记住
+    // 重建前的滚动位置，重建后原样恢复，避免打断阅读体验。
+    const previousScrollTop = treeEl.scrollTop;
+    const restoreScroll = () => { treeEl.scrollTop = previousScrollTop; };
+
     const q = searchQuery.trim().toLowerCase();
 
     if(q){
         treeEl.innerHTML = '';
         renderSearchResults(q);
+        restoreScroll();
         return;
     }
 
@@ -4465,6 +4475,7 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
         empty.style.textAlign = 'center';
         empty.style.fontSize = '14px';
         treeEl.appendChild(empty);
+        restoreScroll();
         return;
     }
 
@@ -4477,6 +4488,7 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
     renderNodes(library, fragment, 0);
     treeEl.innerHTML = '';
     treeEl.appendChild(fragment);
+    restoreScroll();
     }
 
     function renderNodes(nodes, container, depth){
