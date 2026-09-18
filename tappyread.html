@@ -1747,13 +1747,14 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
                         <li>✅ 白名单设置</li>
                         <li>✅ 界面状态（选中的绘本、折叠状态等）</li>
                     </ul>
+                    <div class="tip">备份文件不包含图片本身的内容，图片通过云端地址加载，所以文件体积很小、导出速度也很快；只要图片已经上传到云端（正常使用中会自动上传），导入后图片就能正常显示。</div>
                 </div>
                 <div class="step">
                     <strong>导入备份</strong><br>
                     点击 <span class="btn-demo green">📥 导入</span>，选择之前导出的 <code>.json</code> 文件即可恢复全部数据。
                     <div class="warning">导入会覆盖当前所有数据，请确保已备份重要内容。</div>
                 </div>
-
+                
                 <!-- ===== 快捷键 ===== -->
                 <h2>⌨️ 快捷键</h2>
                 <div class="shortcut-grid">
@@ -3011,6 +3012,10 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
         const normalized = {
             ...source,
             tree: candidateTree,
+            // 🆕 兼容直接导入 COS 服务端保存的目录 JSON（字段是 updatedAt 而不是
+            // timestamp）：如果本身没有 timestamp，就用 updatedAt 顶上，导入确认
+            // 弹窗里"备份时间"才不会显示"未知"。
+            timestamp: source.timestamp || source.updatedAt || '',
             imgDir: normalizeDirValue(source.imgDir || source.imageDir || imgDir || DEFAULT_COS_DIR),
             htmlDir: normalizeDirValue(source.htmlDir || source.htmlDirectory || deriveHtmlDirFromImgDir(source.imgDir || source.imageDir || imgDir || DEFAULT_COS_DIR))
         };
@@ -3025,34 +3030,18 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
         return normalized;
     }
 
-    // 增强的导出备份：包含图片 Base64 数据，并保留 HTML / 图片目录分离
+    // 导出备份：只导出结构化的目录数据（跟 COS 服务端保存的目录 JSON 内容
+    // 保持一致的思路），不再内嵌图片的 base64 数据。
+    // 🆕 之前这里会把每一页的图片都转成 base64 塞进 imageData 字段，导致导出
+    // 的 JSON 文件体积巨大（远大于 COS 上实际保存的目录 JSON），而且这个过程
+    // 很慢（要逐张读图转码）。现在页面的图片地址靠 cosKey 指向 COS 上
+    // "jpeg/绘本名称/文件名" 这个固定结构（详见 buildImageCosKey），这个地址
+    // 本身就是可以公开访问、跨账号有效的完整路径，不需要、也不应该再额外把
+    // 图片内容整份复制一遍到导出文件里——只要 cosKey 保留在 tree 里，导入后
+    // 图片就能直接按云端地址正常加载。
     async function exportBackup() {
-        const allPages = getAllPages(library);
-        const imageDataMap = {};
-
-        for (const page of allPages) {
-            if (page.file && sessionSrcCache[page.file]) {
-                imageDataMap[page.file] = sessionSrcCache[page.file];
-            } else if (page.file) {
-                const imgElements = document.querySelectorAll('img');
-                for (const img of imgElements) {
-                    const src = img.getAttribute('src') || '';
-                    if (src.includes(encodeURIComponent(page.file)) || src.includes(page.file)) {
-                        const base64 = await getImageBase64(img);
-                        if (base64) {
-                            imageDataMap[page.file] = base64;
-                            break;
-                        }
-                    }
-                }
-                if (!imageDataMap[page.file] && sessionSrcCache[page.file]) {
-                    imageDataMap[page.file] = sessionSrcCache[page.file];
-                }
-            }
-        }
-
         const backupData = {
-            version: '3.0',
+            version: '4.0',
             timestamp: new Date().toISOString(),
             imgDir: normalizeDirValue(imgDir || DEFAULT_COS_DIR),
             htmlDir: normalizeDirValue(htmlDir || deriveHtmlDirFromImgDir(imgDir)),
@@ -3061,16 +3050,10 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
             collapsed: [...collapsedNodes],
             whitelist: whitelist,
             currentStoryId: currentStoryId,
-            currentSpread: currentSpread,
-            imageData: imageDataMap
+            currentSpread: currentSpread
         };
 
         const jsonStr = JSON.stringify(backupData, null, 2);
-        if (jsonStr.length > 50 * 1024 * 1024) {
-            if (!confirm('备份文件较大（超过50MB），可能无法完整保存。建议分批次导出。\n\n是否继续？')) {
-                return;
-            }
-        }
         const blob = new Blob([jsonStr], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -3110,16 +3093,30 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
                     return;
                 }
 
-                const isLegacy = !backupData.htmlDir || backupData.version === '1.0' || backupData.version === '2.0' || !backupData.imageData;
-                const isV2 = backupData.version === '2.0' || backupData.version === '3.0' || !!backupData.imageData;
-                if (isLegacy && !isV2) {
-                    if (!confirm('此备份文件为旧版本（不含图片数据），导入后图片可能无法显示。\n\n建议使用新版导出的备份文件。\n\n是否继续导入？')) {
+                // 🆕 判断图片能不能正常恢复：新版备份不再内嵌 base64 图片数据，
+                // 而是靠每一页自带的 cosKey 直接指向 COS 上"jpeg/绘本名称/文件名"
+                // 这个固定结构去加载——只要 cosKey 还在，图片地址就是对的，不需要
+                // 也不应该看有没有 imageData 字段来判断"是不是新版"。
+                // 只有真正连 cosKey 都没有、又没有旧版内嵌图片数据兜底的页面，
+                // 图片才可能加载不出来，这种情况才需要提醒用户。
+                const hasEmbeddedImageData = !!(backupData.imageData && typeof backupData.imageData === 'object' && Object.keys(backupData.imageData).length > 0);
+                const allImportPages = getAllPages(backupData.tree);
+                const pagesLackingImageInfo = allImportPages.filter(p => {
+                    if (isHtmlPageLike(p)) return false; // HTML 页面走 htmlCosKey/html 字段，不受影响
+                    if (p.cosKey) return false;
+                    if (hasEmbeddedImageData && p.file && backupData.imageData[p.file]) return false;
+                    return true;
+                }).length;
+                const imageInfoOk = pagesLackingImageInfo === 0;
+
+                if (!imageInfoOk) {
+                    if (!confirm(`此备份文件中有 ${pagesLackingImageInfo} 张图片缺少云端地址信息（cosKey），导入后可能无法正常显示，需要之后手动重新添加。\n\n是否仍要继续导入？`)) {
                         return;
                     }
                 }
 
                 const totalStories = getAllStories(backupData.tree).length;
-                if (!confirm(`即将导入备份数据，将覆盖当前所有绘本目录及页面文本。\n备份时间：${backupData.timestamp || '未知'}\n绘本数：${totalStories}\n${isV2 ? '✅ 包含图片数据' : '⚠️ 不含图片数据'}\n\n确定要继续吗？`)) {
+                if (!confirm(`即将导入备份数据，将覆盖当前所有绘本目录及页面文本。\n备份时间：${backupData.timestamp || '未知'}\n绘本数：${totalStories}\n${imageInfoOk ? '✅ 图片将按云端地址正常加载' : `⚠️ 有 ${pagesLackingImageInfo} 张图片可能无法显示`}\n\n确定要继续吗？`)) {
                     return;
                 }
 
@@ -3200,13 +3197,13 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
                     }
                 }
 
-                if (!backupData.imageData) {
-                    alert('⚠️ 此备份文件为旧版本，不含图片数据。\n\n请确保图片目录设置正确，否则图片将无法显示。');
+                if (!imageInfoOk) {
+                    alert(`⚠️ 有 ${pagesLackingImageInfo} 张图片缺少云端地址信息，可能无法正常显示，请检查后手动重新添加对应图片。`);
                 }
 
                 await saveLibrary();
                 renderAll(true);
-                alert(`✅ 备份导入成功！\n\n绘本目录及页面文本已恢复。\n${backupData.imageData ? '✅ 图片数据已恢复' : '⚠️ 请手动设置图片目录'}\n图片目录已更新为：${imgDir}\nHTML 目录已更新为：${htmlDir}`);
+                alert(`✅ 备份导入成功！\n\n绘本目录及页面文本已恢复。\n${imageInfoOk ? '✅ 图片将按云端地址正常加载' : `⚠️ 有 ${pagesLackingImageInfo} 张图片可能需要手动重新添加`}\n图片目录已更新为：${imgDir}\nHTML 目录已更新为：${htmlDir}`);
             } catch(err) {
                 alert('❌ 导入失败：备份文件格式无效\n\n错误信息：' + err.message);
                 console.error(err);
@@ -7331,26 +7328,40 @@ nextBtn.addEventListener('click', function() {
             sessionSrcCache[item.name] = item.dataUrl;
             story.pages.push({ file: item.name, text: item.text.trim() });
         });
-        // 异步上传本次新增的图片到 COS，成功后回填 cosKey，确保刷新后图片不丢失
-        // 🆕 传入 story.title：图片会按绘本名称存入 jpeg/{绘本名}/ 子文件夹，
-        // 覆盖"新增绘本"（新建后立即打开本弹窗添加首批图片）与"添加绘本页面"两种场景
-        uploadPagesToCos(pendingItems.map(item => ({ file: item.name, dataUrl: item.dataUrl })), story.title)
-            .then(results => {
-                if (!results.length) return;
-                let changed = false;
-                for (const r of results) {
-                    if (!r.cosKey) continue;
-                    const page = story.pages.find(p => p.file === r.file);
-                    if (page && !page.cosKey) { page.cosKey = r.cosKey; changed = true; }
-                }
-                if (changed) saveLibrary();
-            })
-            .catch(() => {});
+        const itemsToUpload = pendingItems.map(item => ({ file: item.name, dataUrl: item.dataUrl }));
         currentSpread = Math.floor(insertAt / 2);
         pendingItems = [];
         renderPending();
         saveLibrary();
-        ocrStatusText.textContent = '✅ 已加入绘本，图片已开始异步上传至云端。';
+        // 🆕 等图片真正上传到 COS、cosKey 回填并保存之后再关闭弹窗，而不是"点了
+        // 就关、后台悄悄传"——避免用户看到弹窗关闭就以为已经完成，立刻刷新页面，
+        // 结果这批图片其实还没传完，cosKey 没保存下来，刷新后按旧的扁平路径规则
+        // 加载图片、找不到文件。传入 story.title：图片按绘本名称存入
+        // jpeg/{绘本名}/ 子文件夹，覆盖"新增绘本"（新建后立即打开本弹窗添加首批
+        // 图片）与"添加绘本页面"两种场景。
+        ocrStatusText.textContent = `⏳ 正在上传图片至云端：0/${itemsToUpload.length}，请稍候...`;
+        addAllBtn.disabled = true;
+        try {
+            let uploaded = 0;
+            const results = await uploadPagesToCos(itemsToUpload, story.title, (a) => {
+                if (typeof a === 'number') {
+                    uploaded++;
+                    ocrStatusText.textContent = `⏳ 正在上传图片至云端：${uploaded}/${itemsToUpload.length}，请稍候...`;
+                }
+            });
+            let changed = false;
+            for (const r of results) {
+                if (!r.cosKey) continue;
+                const page = story.pages.find(p => p.file === r.file);
+                if (page && !page.cosKey) { page.cosKey = r.cosKey; changed = true; }
+            }
+            if (changed) saveLibrary();
+            ocrStatusText.textContent = '✅ 已加入绘本，图片已上传至云端。';
+        } catch (error) {
+            ocrStatusText.textContent = '⚠️ 已加入绘本，但部分图片上传云端失败，建议稍后重新添加。';
+        } finally {
+            addAllBtn.disabled = false;
+        }
         closeAddModal();
         renderAll(true);
     });
@@ -7780,6 +7791,45 @@ nextBtn.addEventListener('click', function() {
 
             importedFolderId = targetFolderId;
             const importedStoryIds = [];
+            // 🆕 修复"刷新页面后新绘本图片加载失败"问题：之前图片上传到 COS 是
+            // 完全后台异步进行的（不阻塞导入流程），如果用户在图片还没上传完、
+            // cosKey 还没来得及回填并保存到服务器之前就刷新了页面，这些新绘本的
+            // 页面就只剩下裸文件名（没有 cosKey），会退化成按旧的扁平目录规则去
+            // 拼图片地址，跟 COS 里"jpeg/绘本名称/文件名"的真实存放结构对不上，
+            // 于是图片就加载不出来。这里把每本绘本的上传 Promise 收集起来，
+            // 在本次批量导入真正结束、写入最终目录并提示"导入完成"之前统一
+            // await 等待全部图片确实上传完成、cosKey 确实回填并保存，从根本上
+            // 消除这个"刷新太快"的竞态问题。
+            const pendingCosUploads = [];
+            // 🆕 图片上传等待阶段的实时进度：total 是本批次所有绘本加起来要
+            // 上传的图片总数，uploaded 是已经确认上传完成（成功或失败都算"处理
+            // 完"）的数量；uploadWaitLogEl 是日志里那一行"正在确认..."的 DOM
+            // 节点引用，进度变化时原地更新文字，而不是每张图片都新增一行日志
+            // （数量一多容易刷屏），同时复用进度条展示百分比。
+            let totalUploadImages = 0;
+            let uploadedImagesCount = 0;
+            let uploadWaitLogEl = null;
+            const renderUploadWaitProgress = () => {
+                const pct = totalUploadImages > 0 ? Math.round((uploadedImagesCount / totalUploadImages) * 100) : 100;
+                progressFill.style.width = Math.min(pct, 100) + '%';
+                processedCountEl.textContent = uploadedImagesCount;
+                if (uploadWaitLogEl) {
+                    uploadWaitLogEl.textContent = `⏳ 正在确认所有图片已上传到云端：${uploadedImagesCount}/${totalUploadImages}（${pct}%），请稍候...`;
+                }
+            };
+            // COS 直传的 onProgress 有两种完全不同的调用方式：cosPutDirect 内部
+            // 会把它原样交给 COS SDK 做"单张图片的字节级上传进度"回调（参数是一个
+            // {loaded,total,...} 对象，一张图片上传过程中会连续触发很多次）；
+            // uploadPagesToCos 自己的循环里又会在"一整张图片上传完成"时额外调用
+            // 一次（参数是三个数字/字符串：本绘本已完成数、本绘本总数、文件名）。
+            // 这里只在后一种调用方式（第一个参数是数字）时才计数，避免被字节级
+            // 进度事件干扰，统计口径统一成"按张数计"。
+            const handleUploadItemProgress = (a) => {
+                if (typeof a === 'number') {
+                    uploadedImagesCount++;
+                    renderUploadWaitProgress();
+                }
+            };
 
             for (let gIdx = 0; gIdx < groups.length; gIdx++) {
                 if (batchCancelFlag) {
@@ -7898,10 +7948,15 @@ nextBtn.addEventListener('click', function() {
 
                     logProgress(`✅ 绘本 "${group.displayName}" 导入成功 (${newStory.pages.length} 页)`);
 
-                    // 异步上传本绘本全部图片到 COS，成功后回填 cosKey（不阻塞导入进度）
+                    // 上传本绘本全部图片到 COS，成功后回填 cosKey。
                     // 🆕 传入 cleanName（本绘本标题）：图片按绘本名称存入 jpeg/{绘本名}/ 子文件夹，
                     // 覆盖"图片批量生成"与"PDF批量生成"（PDF批量生成最终也是走这条统一的导入逻辑）
-                    uploadPagesToCos(cosUploadItems, cleanName).then(results => {
+                    // 🆕 不再是纯粹的"后台异步、不阻塞"——上传任务会被收集进
+                    // pendingCosUploads，在本次批量导入真正结束、提示"导入完成"
+                    // 之前统一等待全部完成，避免用户看到"导入成功"就立刻刷新页面，
+                    // 导致图片还没真正传完、cosKey 还没保存，刷新后加载不出来。
+                    totalUploadImages += cosUploadItems.length;
+                    const uploadPromise = uploadPagesToCos(cosUploadItems, cleanName, handleUploadItemProgress).then(results => {
                         const storyNow = findNodeById(library, nid);
                         if (!storyNow || !storyNow.pages) return;
                         let changed = false;
@@ -7911,7 +7966,11 @@ nextBtn.addEventListener('click', function() {
                             if (page && !page.cosKey) { page.cosKey = r.cosKey; changed = true; }
                         }
                         if (changed) saveLibrary();
-                    }).catch(() => {});
+                        logProgress(`  ☁️ 绘本 "${group.displayName}" 的图片已全部上传到云端`);
+                    }).catch((err) => {
+                        logProgress(`  ⚠️ 绘本 "${group.displayName}" 部分图片上传到云端失败：${err && err.message ? err.message : '未知错误'}，可稍后在绘本目录里重新添加对应图片`);
+                    });
+                    pendingCosUploads.push(uploadPromise);
                 } else if (batchCancelFlag) {
                     break;
                 } else {
@@ -7925,6 +7984,30 @@ nextBtn.addEventListener('click', function() {
                 const pct = totalImages > 0 ? Math.round((processed / totalImages) * 100) : 0;
                 progressFill.style.width = Math.min(pct, 100) + '%';
                 processedCountEl.textContent = processed;
+            }
+
+            // 🆕 关键修复点：在最终保存/提示"导入完成"之前，等待本批次所有绘本
+            // 的图片确实都已经上传到 COS、cosKey 确实已经回填。之前这一步是纯
+            // 后台异步、不等待的，如果用户看到"导入成功"就立刻刷新页面，图片
+            // 可能还没传完，导致刷新后按旧的扁平路径规则加载图片、找不到文件。
+            // 🆕 这个等待过程本身也会实时展示"已上传 X / 共 Y 张"的进度，而不是
+            // 只显示一句静态的"请稍候"——进度条和日志行都会随每张图片上传完成
+            // 同步刷新，避免用户误以为程序卡住了。
+            if (!batchCancelFlag && pendingCosUploads.length > 0) {
+                totalItemsLabel.textContent = '待上传图片';
+                totalImagesEl.textContent = totalUploadImages;
+                totalStoriesEl.textContent = groups.length;
+                uploadWaitLogEl = logProgress('');
+                renderUploadWaitProgress();
+                await Promise.all(pendingCosUploads);
+                const allUploaded = uploadedImagesCount >= totalUploadImages;
+                progressFill.style.width = '100%';
+                processedCountEl.textContent = uploadedImagesCount;
+                if (uploadWaitLogEl) {
+                    uploadWaitLogEl.textContent = allUploaded
+                        ? `✅ 全部 ${totalUploadImages} 张图片已确认上传到云端`
+                        : `⚠️ ${uploadedImagesCount}/${totalUploadImages} 张图片确认完成，部分图片可能上传失败（详见上方日志，可稍后在绘本目录里重新添加）`;
+                }
             }
 
             saveLibrary();
@@ -8233,6 +8316,7 @@ nextBtn.addEventListener('click', function() {
         div.textContent = msg;
         progressLog.appendChild(div);
         progressLog.scrollTop = progressLog.scrollHeight;
+        return div; // 返回这一行的 DOM 节点，方便调用方后续原地更新文本（用于实时进度展示）
     }
 
     /* =====================================================================
