@@ -194,7 +194,7 @@ function readCosJsonFile(key) {
     return Promise.resolve(null);
   }
 
-  return new Promise(resolve => {
+  return new Promise((resolve, reject) => {
     cosClient.getObject(
       {
         Bucket: COS_BUCKET,
@@ -210,9 +210,13 @@ function readCosJsonFile(key) {
             return resolve(null);
           }
 
+          // 🆕 关键修复：超时/网络异常等"读取失败"不能当成"文件不存在"处理，
+          // 否则调用方会把这种情况误判成新用户，进而用 start.json 模板去
+          // 覆盖用户已有的真实绘本目录，造成数据丢失。这里改成 reject，让
+          // 调用方能区分"真的没有这个文件"和"这次没读到"。
           console.warn('读取 COS 绘本目录异常:', err);
 
-          return resolve(null);
+          return reject(err);
         }
 
         try {
@@ -229,7 +233,8 @@ function readCosJsonFile(key) {
         } catch (error) {
           console.warn('解析 COS 绘本目录失败:', error);
 
-          return resolve(null);
+          // 同理：JSON 解析失败也是"这次读取有问题"，不是"文件不存在"。
+          return reject(error);
         }
       }
     );
@@ -426,8 +431,25 @@ export default async function handler(req, res) {
         });
       }
 
-      const snapshot =
-        await getLatestLibraryFromCos(user.username);
+      // 🆕 关键修复：明确区分"用户确实没有自己的目录文件"（真正的新用户，
+      // 可以安全地返回 start.json 模板）和"这次读取失败了"（超时/网络异常等，
+      // 绝不能当成新用户处理——否则会用默认模板顶替用户已经保存好的真实
+      // 绘本目录，前端还会紧接着把这个模板自动保存回去，把用户的数据永久
+      // 覆盖掉）。readCosJsonFile 现在只会在"确认文件不存在"时返回
+      // null，其它任何异常都会被抛出，这里必须单独捕获并返回错误状态码，
+      // 而不是继续往下走"当成新用户、返回 start.json"的逻辑。
+      let snapshot;
+      try {
+        snapshot = await getLatestLibraryFromCos(user.username);
+      } catch (error) {
+        console.error(
+          '读取用户绘本目录失败（非"文件不存在"的异常，为避免误判为新用户、错误覆盖用户数据，直接返回错误）:',
+          error
+        );
+        return sendJson(res, 503, {
+          error: '绘本目录暂时无法读取，请稍后重试'
+        });
+      }
 
       if (
         snapshot &&
@@ -448,7 +470,8 @@ export default async function handler(req, res) {
         });
       }
 
-      // 当前用户没有 json/{username}.json：
+      // 走到这里说明 getLatestLibraryFromCos 明确返回了 null（确认
+      // json/{username}.json 及旧版命名文件都不存在），才是真正的新用户，
       // 直接读取 start.json 作为新用户初始目录。
       const startSnapshot =
         await getStartLibraryFromCos().catch(

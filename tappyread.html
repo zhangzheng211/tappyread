@@ -1294,8 +1294,9 @@ body.reader-fullscreen .stage-wrap {
             <div class="hint-text">💡 识别效果与选取区域的清晰度、字体大小有关；如有个别文字不准确，可直接在上方修改后再使用。</div>
         </div>
         <div class="modal-actions">
-            <button class="btn" id="copyGrabTextBtn">📋 复制</button>
             <button class="btn primary" id="useGrabTextBtn">📝 设为本页朗读文字</button>
+            <button class="btn primary" id="appendGrabTextBtn">➕ 加入本页朗读文字</button>
+            <button class="btn" id="copyGrabTextBtn">📋 复制</button>
             <button class="btn" id="closeGrabTextBtn2">关闭</button>
         </div>
     </div>
@@ -2740,7 +2741,10 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
     let paintedFromCache = false;
     try {
         const cached = await idbGet(LS_LIB_KEY);
-        if(cached && Array.isArray(cached.tree) && cached.tree.length > 0){
+        // 🆕 只要缓存里 tree 是数组就信任（哪怕是空数组——用户可能确实把所有
+        // 绘本都删除了），不再要求 length>0，避免"真实的空目录"缓存被当成
+        // "没有缓存"处理，进而错误地往下走网络兜底逻辑。
+        if(cached && Array.isArray(cached.tree)){
             library = cached.tree;
             collapsedNodes = new Set(Array.isArray(cached.collapsed) ? cached.collapsed : []);
             selectedFolderId = cached.selectedFolderId || null;
@@ -2761,7 +2765,11 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
         const apiResp = await fetch('/api/library', { credentials:'include' });
         if(apiResp.ok){
             const apiData = await apiResp.json();
-            if(apiData && Array.isArray(apiData.tree) && apiData.tree.length){
+            // 🆕 关键修复：只要求 tree 是数组即可信任，不再要求 length>0。
+            // 之前要求 length>0，导致"真实但为空的绘本目录"（用户删光了所有
+            // 绘本）也会被当成"没有目录"，进而误触发下面的模板兜底逻辑，把
+            // 空目录悄悄换成 start.json 模板内容。
+            if(apiData && Array.isArray(apiData.tree)){
                 library = apiData.tree;
                 collapsedNodes = new Set(apiData.collapsed || []);
                 selectedFolderId = apiData.selectedFolderId || null;
@@ -2771,28 +2779,65 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
                 renderAll(false);
                 return;
             }
+            // apiData.tree 不是数组：后端返回的数据格式不对，视为一次失败，
+            // 往下走安全兜底，不能贸然覆盖当前目录。
         }
-        // API异常时才尝试COS目录直读作为最后兜底
+
+        // 🆕 关键修复（对应"绘本目录突然刷新成初始状态、新增内容异常丢失"）：
+        // 走到这里说明 /api/library 请求失败了（网络错误、非 200、或数据格式
+        // 不对）。这只代表"这次没读到"，绝不等于"这个用户是新用户"。
+        // 之前的实现会无条件往下走"COS 直连兜底"，而兜底逻辑又依赖一个曾经
+        // 被硬编码成 false 的 userLibraryExists 标记，导致几乎任何一次读取
+        // 失败（哪怕只是 Vercel 到广州 COS 的一次网络抖动）都会被误判成
+        // "新用户"，进而被 start.json 模板覆盖显示内容，并且还会自动把这个
+        // 模板保存回云端，把用户真实的绘本目录永久顶掉——这正是问题的根因。
+        // 现在的策略：如果本地已经有缓存在正常显示，这次读取失败就只在
+        // 控制台提示一声、继续使用缓存，绝不允许继续往下走可能导致自动
+        // 覆盖真实数据的模板兜底逻辑。
+        if(paintedFromCache){
+            console.warn('⚠️ 绘本目录本次同步失败（网络或服务异常），继续使用本地缓存，不会用默认模板覆盖');
+            showTreeLoading(false);
+            return;
+        }
+
+        // 只有本地完全没有缓存（比如全新设备第一次打开）时，才继续尝试 COS
+        // 直读兜底——但兜底本身也必须遵守同样的原则：只有明确确认"用户自己
+        // 的目录文件确实不存在"（真正的新用户）才能使用模板，并且只有这种
+        // 情况才允许自动保存模板覆盖（因为这时候本来就没有数据可覆盖）。
         const directClient = await getCosDirectClient().catch(() => null);
         if(!directClient || !COS_DIRECT.config) throw new Error('目录服务暂不可用');
 
         let data = null;
         let loadedFromTemplate = false;
+        let ownFileConfirmedMissing = false;
 
-        // 新用户第一次登录没有 json/{username}.json 是正常状态。
-        // 由 /api/cos/config 提前判断对象是否存在，避免浏览器直接请求不存在的 COS key，
-        // 不再产生 GET json/1.json 404。
-        if(COS_DIRECT.config.userLibraryExists){
+        // 🆕 不再依赖 /api/cos/config 返回的 userLibraryExists 标记来决定要不
+        // 要尝试读取用户自己的文件——该标记只是一个提示，不完全可信。这里
+        // 统一改成：只要 COS 直连可用，就总是先尝试读取用户自己的 jsonKey；
+        // 只有读取结果明确是"确认不存在"（404 / NoSuchKey）时，才认为这是
+        // 真正的新用户，进而允许读取 start.json 模板并自动保存。其它任何
+        // 读取异常（超时、网络问题等）都会被当作失败向上抛出，交给下面的
+        // catch 统一处理，绝不会被误判成新用户、错误地用模板覆盖数据。
+        try {
             const text = await cosGetDirectTextWithRetry(COS_DIRECT.config.jsonKey);
             if(text){
                 const parsed = JSON.parse(text);
                 if(parsed && Array.isArray(parsed.tree)) data = parsed;
+            } else {
+                // 文件存在但内容为空，视为一个空目录（不是"不存在"），不应该
+                // 被模板覆盖。
+                data = { tree: [] };
+            }
+        } catch(readErr) {
+            if(isCosNotFoundError(readErr)){
+                ownFileConfirmedMissing = true;
+            } else {
+                throw readErr; // 非"确认不存在"的异常，直接向上抛，绝不当成新用户
             }
         }
 
-        // 新用户没有自己的目录文件时：浏览器直接从 COS 读取 json/start.json。
-        // 注册接口不再下载/复制 start.json，彻底移除“注册等待 COS”的超时链路。
-        if(!data && COS_DIRECT.config.templateKey){
+        // 只有明确确认用户自己的目录文件不存在时，才读取 start.json 模板。
+        if(!data && ownFileConfirmedMissing && COS_DIRECT.config.templateKey){
             const text = await cosGetDirectTextWithRetry(COS_DIRECT.config.templateKey);
             if(text){
                 const parsed = JSON.parse(text);
@@ -2843,6 +2888,8 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
 
         // 新用户模板只作为首屏数据；马上异步写入自己的 json/{username}.json。
         // 不 await，不阻塞首屏，也不影响阅读器可用性。
+        // 🆕 现在只有在"明确确认是新用户"（ownFileConfirmedMissing）时才会
+        // 走到这里，不会再错误地把已有数据的老用户自动保存成模板内容。
         if(loadedFromTemplate){
             saveLibrary().catch(error => console.warn('初始化用户绘本目录异步保存失败：', error));
         }
@@ -5183,6 +5230,7 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
     const closeGrabTextBtn2 = document.getElementById('closeGrabTextBtn2');
     const copyGrabTextBtn = document.getElementById('copyGrabTextBtn');
     const useGrabTextBtn = document.getElementById('useGrabTextBtn');
+    const appendGrabTextBtn = document.getElementById('appendGrabTextBtn');
     let grabTextActiveCtx = null; // { page, captionText, editBtn } —— 记录当前结果弹窗对应的是哪一页
 
     // ---- 独立的 Tesseract Worker：无字符白名单限制，按"一段/整块文字"分段 ----
@@ -5392,6 +5440,24 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
         }
         const { page, captionText } = grabTextActiveCtx;
         page.text = grabTextResultTa.value.trim();
+        fillCaption(captionText, page.text);
+        renderTree();
+        saveLibrary();
+        closeGrabTextResultModal();
+    });
+
+    // 🆕 加入本页朗读文字：不覆盖原有朗读内容，而是把这次抓取到的文字追加到
+    // 原内容后面，中间用一个空格隔开（原内容为空时直接使用抓取到的文字，
+    // 不会多出一个多余的前导空格）。
+    appendGrabTextBtn.addEventListener('click', () => {
+        if (!grabTextActiveCtx || !grabTextActiveCtx.page) {
+            closeGrabTextResultModal();
+            return;
+        }
+        const { page, captionText } = grabTextActiveCtx;
+        const grabbed = grabTextResultTa.value.trim();
+        const original = String(page.text || '').trim();
+        page.text = [original, grabbed].filter(Boolean).join(' ');
         fillCaption(captionText, page.text);
         renderTree();
         saveLibrary();
