@@ -43,7 +43,7 @@ const COS_IMG_DIR = (process.env.COS_IMG_DIR || 'jpeg').replace(/\/+$/, '');
 const COS_HTML_DIR = (process.env.COS_HTML_DIR || 'html').replace(/\/+$/, '');
 const COS_JSON_DIR = (process.env.COS_JSON_DIR || 'json').replace(/\/+$/, '');
 const COS_TEMPLATE_KEY = process.env.COS_TEMPLATE_KEY || `${COS_JSON_DIR}/start.json`;
-const COS_BASE_URL = `https://${COS_BUCKET}.cos.${COS_REGION}.tencentcos.cn/`;
+const COS_BASE_URL = `https://${COS_BUCKET}.cos.${COS_REGION}.myqcloud.com/`;
 
 const cosConfigured = Boolean(process.env.COS_SECRET_ID && process.env.COS_SECRET_KEY);
 const cosClient = cosConfigured
@@ -67,7 +67,6 @@ const TTS_VOLUME = Math.max(-10, Math.min(10, Number(process.env.TENCENT_TTS_VOL
 const TTS_MAX_CHARS = 500;
 const TTS_CACHE_DIR = (process.env.TENCENT_TTS_CACHE_DIR || 'audio').replace(/\/+$/, '');
 const TTS_CACHE_ENABLED = cosConfigured && process.env.TENCENT_TTS_CACHE !== '0';
-const TTS_RACE_TIMEOUT_MARK = Symbol('race-timeout'); // 缓存查询"领先时间"用的哨兵值
 
 function ttsSha256Hex(message) {
   return crypto.createHash('sha256').update(message, 'utf8').digest('hex');
@@ -279,7 +278,7 @@ function listCosKeys(prefix) {
 
 async function readCosJsonFile(key) {
   if (!key || !cosClient) return null;
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     cosClient.getObject({
       Bucket: COS_BUCKET,
       Region: COS_REGION,
@@ -287,10 +286,8 @@ async function readCosJsonFile(key) {
     }, (err, data) => {
       if (err) {
         if (err.code === 'NoSuchKey' || err.statusCode === 404) return resolve(null);
-        // 🆕 关键修复：超时/网络异常不能当成"文件不存在"，否则会被上层误判成
-        // 新用户、用 start.json 模板覆盖用户真实的绘本目录，造成数据丢失。
         console.warn('读取 COS 绘本目录异常:', err);
-        return reject(err);
+        return resolve(null);
       }
       try {
         const body = data && data.Body ? Buffer.from(data.Body) : Buffer.alloc(0);
@@ -298,7 +295,7 @@ async function readCosJsonFile(key) {
         return resolve(text ? JSON.parse(text) : null);
       } catch (error) {
         console.warn('解析 COS 绘本目录失败:', error);
-        return reject(error);
+        return resolve(null);
       }
     });
   });
@@ -832,36 +829,14 @@ app.post('/api/tts', authenticate, async (req, res) => {
     const speed = Math.max(-2, Math.min(6, (rate - 1) / 0.2));
 
     const cacheKey = ttsCacheKeyFor(text, TTS_VOICE_TYPE, speed);
-
-    // 🆕 延迟优化：给缓存查询一个 150ms 的领先时间，领先时间内有结果就走原来
-    // 的逻辑（命中用缓存不调用腾讯云，未命中正常调用腾讯云，无额外开销）；
-    // 只有缓存查询明显变慢时，才提前并行发起腾讯云合成，避免继续串行等到
-    // 最长 600ms 的缓存超时。详细说明见 api/tts.js 里的注释。
-    const RACE_WINDOW_MS = 150;
-    const cachePromise = TTS_CACHE_ENABLED ? ttsCosGetObject(cacheKey) : Promise.resolve(null);
-    const raced = await Promise.race([
-      cachePromise,
-      new Promise(resolve => setTimeout(() => resolve(TTS_RACE_TIMEOUT_MARK), RACE_WINDOW_MS))
-    ]);
-
-    let synthesisPromise;
-    let cached;
-    if (raced !== TTS_RACE_TIMEOUT_MARK) {
-      cached = raced;
+    if (TTS_CACHE_ENABLED) {
+      const cached = await ttsCosGetObject(cacheKey);
       if (cached) {
-        return res.json({ audio: `data:audio/mp3;base64,${cached.toString('base64')}`, cached: true });
-      }
-      synthesisPromise = synthesizeWithTencent({ secretId, secretKey, text, speed });
-    } else {
-      synthesisPromise = synthesizeWithTencent({ secretId, secretKey, text, speed });
-      cached = await cachePromise;
-      if (cached) {
-        synthesisPromise.catch(() => {});
         return res.json({ audio: `data:audio/mp3;base64,${cached.toString('base64')}`, cached: true });
       }
     }
 
-    const audioBase64 = await synthesisPromise;
+    const audioBase64 = await synthesizeWithTencent({ secretId, secretKey, text, speed });
 
     if (TTS_CACHE_ENABLED) {
       ttsCosPutObject(cacheKey, Buffer.from(audioBase64, 'base64')).catch(() => {});

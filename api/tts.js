@@ -40,7 +40,6 @@ const COS_REGION = process.env.COS_REGION || 'ap-guangzhou';
 const TTS_CACHE_DIR = (process.env.TENCENT_TTS_CACHE_DIR || 'audio').replace(/\/+$/, '');
 const TTS_CACHE_ENABLED = Boolean(process.env.COS_SECRET_ID && process.env.COS_SECRET_KEY) && process.env.TENCENT_TTS_CACHE !== '0';
 const TTS_CACHE_LOOKUP_TIMEOUT_MS = 600; // 缓存查询超时保护，避免拖慢整体响应
-const RACE_TIMEOUT_MARK = Symbol('race-timeout'); // 缓存查询"领先时间"用的哨兵值，跟任何合法的缓存结果（Buffer/null）都不会相等
 const DEBUG_TIMING = process.env.TTS_DEBUG_TIMING === '1';
 
 let cosClientPromise = null;
@@ -212,50 +211,19 @@ export default async function handler(req, res) {
     const speed = Math.max(-2, Math.min(6, (rate - 1) / 0.2));
 
     const cacheKey = cacheKeyFor(text, TTS_VOICE_TYPE, speed);
-
-    // 🆕 延迟优化：给 COS 缓存查询一个较短的"领先时间"（150ms）。正常情况下
-    // 同地域缓存查询应该很快返回（不管命中与否），领先时间内就有结果的话，
-    // 走原来的逻辑——命中就直接用缓存（不调用腾讯云，继续保留缓存本来的
-    // 省钱效果），没命中就正常调用腾讯云，不会有任何多余开销。
-    // 只有当缓存查询明显变慢（网络抖动、COS 响应慢等）、领先时间内还没结果
-    // 时，才提前把腾讯云合成并行发起，避免像以前那样一直串行等到最长 600ms
-    // 的缓存超时才肯开始合成；如果缓存最终还是命中了，就丢弃这次已经并行
-    // 发起的腾讯云结果——这种情况本来就是缓存查询本身出了问题的小概率场景，
-    // 用一次可能"浪费"的腾讯云调用换取明显更低的延迟是划算的。
-    const RACE_WINDOW_MS = 150;
-    const tCache = Date.now();
-    const cachePromise = TTS_CACHE_ENABLED ? cosGetObject(cacheKey) : Promise.resolve(null);
-    const raced = await Promise.race([
-      cachePromise,
-      new Promise(resolve => setTimeout(() => resolve(RACE_TIMEOUT_MARK), RACE_WINDOW_MS))
-    ]);
-
-    let synthesisPromise;
-    let cached;
-    if (raced !== RACE_TIMEOUT_MARK) {
-      // 缓存查询在领先时间内就有结果了（命中或未命中）
-      cached = raced;
+    if (TTS_CACHE_ENABLED) {
+      const tCache = Date.now();
+      const cached = await cosGetObject(cacheKey);
       if (DEBUG_TIMING) console.log(`[tts] COS 缓存查询耗时 ${Date.now() - tCache}ms，命中=${!!cached}`);
       if (cached) {
         if (DEBUG_TIMING) console.log(`[tts] 总耗时 ${Date.now() - t0}ms（缓存命中）`);
         return sendJson(res, 200, { audio: `data:audio/mp3;base64,${cached.toString('base64')}`, cached: true });
       }
-      synthesisPromise = synthesizeWithTencent({ secretId, secretKey, text, speed });
-    } else {
-      // 缓存查询超过领先时间还没结果：提前并行发起腾讯云合成，同时继续等缓存
-      if (DEBUG_TIMING) console.log(`[tts] COS 缓存查询超过 ${RACE_WINDOW_MS}ms 未返回，提前并行发起腾讯云合成`);
-      synthesisPromise = synthesizeWithTencent({ secretId, secretKey, text, speed });
-      cached = await cachePromise;
-      if (cached) {
-        synthesisPromise.catch(() => {}); // 缓存最终命中，丢弃已并行发起的腾讯云结果
-        if (DEBUG_TIMING) console.log(`[tts] 总耗时 ${Date.now() - t0}ms（缓存命中，但查询较慢）`);
-        return sendJson(res, 200, { audio: `data:audio/mp3;base64,${cached.toString('base64')}`, cached: true });
-      }
     }
 
     const tTencent = Date.now();
-    const audioBase64 = await synthesisPromise;
-    if (DEBUG_TIMING) console.log(`[tts] 腾讯云合成耗时 ${Date.now() - tTencent}ms（可能与缓存查询有重叠）`);
+    const audioBase64 = await synthesizeWithTencent({ secretId, secretKey, text, speed });
+    if (DEBUG_TIMING) console.log(`[tts] 腾讯云合成耗时 ${Date.now() - tTencent}ms`);
 
     if (TTS_CACHE_ENABLED) {
       // 缓存写入不阻塞响应，失败也不影响本次播放
