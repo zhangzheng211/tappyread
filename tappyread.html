@@ -1294,8 +1294,9 @@ body.reader-fullscreen .stage-wrap {
             <div class="hint-text">💡 识别效果与选取区域的清晰度、字体大小有关；如有个别文字不准确，可直接在上方修改后再使用。</div>
         </div>
         <div class="modal-actions">
-            <button class="btn" id="copyGrabTextBtn">📋 复制</button>
             <button class="btn primary" id="useGrabTextBtn">📝 设为本页朗读文字</button>
+            <button class="btn" id="appendGrabTextBtn">➕ 加入本页朗读文字</button>
+            <button class="btn" id="copyGrabTextBtn">📋 复制</button>
             <button class="btn" id="closeGrabTextBtn2">关闭</button>
         </div>
     </div>
@@ -3155,6 +3156,9 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
                     currentSpread = 0;
                 }
                 if (currentStoryId) localStorage.setItem(CURRENT_STORY_KEY, currentStoryId);
+
+                // 导入本地目录后立即同步 COS，避免刷新时 /api/library 返回旧目录或 start.json 模板覆盖。
+                await saveLibrary();
 
                 if (backupData.imageData && typeof backupData.imageData === 'object') {
                     Object.keys(backupData.imageData).forEach(key => {
@@ -5183,6 +5187,7 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
     const closeGrabTextBtn2 = document.getElementById('closeGrabTextBtn2');
     const copyGrabTextBtn = document.getElementById('copyGrabTextBtn');
     const useGrabTextBtn = document.getElementById('useGrabTextBtn');
+    const appendGrabTextBtn = document.getElementById('appendGrabTextBtn');
     let grabTextActiveCtx = null; // { page, captionText, editBtn } —— 记录当前结果弹窗对应的是哪一页
 
     // ---- 独立的 Tesseract Worker：无字符白名单限制，按"一段/整块文字"分段 ----
@@ -5392,6 +5397,22 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
         }
         const { page, captionText } = grabTextActiveCtx;
         page.text = grabTextResultTa.value.trim();
+        fillCaption(captionText, page.text);
+        renderTree();
+        saveLibrary();
+        closeGrabTextResultModal();
+    });
+
+    // 新增：把OCR结果追加到当前页原朗读文字后面，单个空格分隔
+    appendGrabTextBtn.addEventListener('click', () => {
+        if (!grabTextActiveCtx || !grabTextActiveCtx.page) {
+            closeGrabTextResultModal();
+            return;
+        }
+        const { page, captionText } = grabTextActiveCtx;
+        const addText = grabTextResultTa.value.trim();
+        const oldText = String(page.text || '').trim();
+        page.text = oldText && addText ? `${oldText} ${addText}` : (oldText || addText);
         fillCaption(captionText, page.text);
         renderTree();
         saveLibrary();
