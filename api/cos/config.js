@@ -16,8 +16,17 @@ function sendJson(res, status, body) {
 
 function objectExists(Key) {
   return new Promise(resolve => {
-    if(!cosClient) return resolve(false);
-    cosClient.headObject({Bucket:COS_BUCKET, Region:COS_REGION, Key}, err => resolve(!err));
+    if(!cosClient) return resolve(true); // 无法判断时保守当作"存在"，避免误触发模板覆盖
+    cosClient.headObject({Bucket:COS_BUCKET, Region:COS_REGION, Key}, err => {
+      if(!err) return resolve(true);
+      const status = Number(err.statusCode || err.status || 0);
+      const code = String(err.code || '').toLowerCase();
+      if(status === 404 || code === 'nosuchkey' || code === 'notfound') return resolve(false);
+      // 🆕 超时/网络异常等其它错误不能当成"文件不存在"，否则会被误判为新用户、
+      // 被 start.json 模板覆盖真实数据。宁可保守地认为"存在"。
+      console.warn('检测 COS 对象是否存在时出错，保守当作存在处理:', Key, err);
+      resolve(true);
+    });
   });
 }
 
@@ -35,7 +44,7 @@ export default async function handler(req, res) {
     if (!user) return sendJson(res, 401, { error: '未登录或登录已过期' });
     const safeUsername = sanitizeUsername(user.username).replace(/_+$/g, '') || 'guest';
     const jsonKey = `${COS_JSON_DIR}/${safeUsername}.json`;
-    const userLibraryExists = false; // 新用户默认走 start.json；避免 Vercel 跨区 headObject 超时
+    const userLibraryExists = cosConfigured ? await objectExists(jsonKey).catch(() => true) : true;
     return sendJson(res, 200, {
       enabled: cosConfigured,
       bucket: COS_BUCKET,

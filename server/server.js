@@ -276,9 +276,9 @@ function listCosKeys(prefix) {
   });
 }
 
-async function readCosJsonFile(key) {
-  if (!key || !cosClient) return null;
-  return new Promise((resolve) => {
+function readCosJsonFile(key) {
+  if (!key || !cosClient) return Promise.resolve(null);
+  return new Promise((resolve, reject) => {
     cosClient.getObject({
       Bucket: COS_BUCKET,
       Region: COS_REGION,
@@ -286,19 +286,65 @@ async function readCosJsonFile(key) {
     }, (err, data) => {
       if (err) {
         if (err.code === 'NoSuchKey' || err.statusCode === 404) return resolve(null);
-        console.warn('读取 COS 绘本目录异常:', err);
-        return resolve(null);
+        // 🆕 关键修复：读取失败（超时/网络异常）不能当成"文件不存在"，否则
+        // 会被上层误判成新用户、用 start.json 模板覆盖用户真实的绘本目录。
+        console.warn('读取 COS 绘本目录异常:', key, err && (err.code || err.message || err));
+        return reject(err);
       }
       try {
         const body = data && data.Body ? Buffer.from(data.Body) : Buffer.alloc(0);
         const text = body.toString('utf8');
         return resolve(text ? JSON.parse(text) : null);
       } catch (error) {
-        console.warn('解析 COS 绘本目录失败:', error);
-        return resolve(null);
+        console.warn('解析 COS 绘本目录失败:', key, error);
+        return reject(error);
       }
     });
   });
+}
+
+// 🆕 /api/library 读取增加重试机制：COS 偶发抖动短暂等待后重试通常能成功，
+// 重试用尽仍失败才继续向上抛出（不会被当成"文件不存在"）。
+async function readCosJsonFileWithRetry(key, retries = 2, delayMs = 500) {
+  let lastError = null;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await readCosJsonFile(key);
+    } catch (error) {
+      lastError = error;
+      if (attempt < retries) {
+        console.warn(`读取 COS 绘本目录失败，${delayMs * (attempt + 1)}ms 后重试（第 ${attempt + 1}/${retries} 次）:`, key);
+        await new Promise(resolve => setTimeout(resolve, delayMs * (attempt + 1)));
+      }
+    }
+  }
+  throw lastError;
+}
+
+// 🆕 COS 绘本目录本地（进程内存）缓存：本地开发服务器进程常驻运行，缓存
+// 生命周期比 Vercel 容器更长；用于 COS 读取失败时的兜底，宁可给一份可能
+// 不是最新的真实数据，也不给 start.json 默认模板。
+const libraryMemoryCache = new Map();
+const LIBRARY_CACHE_MAX_ENTRIES = 500;
+const LIBRARY_CACHE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+
+function cacheLibrarySnapshot(safeUsername, snapshot) {
+  if (!safeUsername || !snapshot) return;
+  if (libraryMemoryCache.size >= LIBRARY_CACHE_MAX_ENTRIES && !libraryMemoryCache.has(safeUsername)) {
+    const oldestKey = libraryMemoryCache.keys().next().value;
+    if (oldestKey !== undefined) libraryMemoryCache.delete(oldestKey);
+  }
+  libraryMemoryCache.set(safeUsername, { snapshot, cachedAt: Date.now() });
+}
+
+function getCachedLibrarySnapshot(safeUsername) {
+  const entry = libraryMemoryCache.get(safeUsername);
+  if (!entry) return null;
+  if (Date.now() - entry.cachedAt > LIBRARY_CACHE_MAX_AGE_MS) {
+    libraryMemoryCache.delete(safeUsername);
+    return null;
+  }
+  return entry;
 }
 
 async function getLatestLibraryFromCos(username) {
@@ -306,11 +352,13 @@ async function getLatestLibraryFromCos(username) {
   const safeUsername = sanitizeUsername(username).replace(/_+$/g, '') || 'guest';
   const directKey = `${COS_JSON_DIR}/${safeUsername}.json`;
 
-  // 快速路径：直接读取标准位置的文件，找不到（404）才退回到列出整个 json/
-  // 目录去匹配旧文件名，避免每次都做"先 list 再 get"两次串行请求
-  const direct = await readCosJsonFile(directKey);
+  // 快速路径（带重试）：直接读取标准位置的文件；读取失败（非"确认不存在"）
+  // 会向上抛出，由调用方决定走内存缓存兜底还是报错，不会静默当成"不存在"。
+  const direct = await readCosJsonFileWithRetry(directKey);
   if (direct) return direct;
 
+  // direct === null：标准文件确认不存在，才尝试兼容旧版文件名（尽力而为，
+  // 允许静默失败）。
   try {
     const keys = await listCosKeys(`${COS_JSON_DIR}/`);
     const legacyMatches = keys.filter(key => {
@@ -320,9 +368,12 @@ async function getLatestLibraryFromCos(username) {
     });
     const preferred = legacyMatches[0] || null;
     if (!preferred) return null;
-    return await readCosJsonFile(preferred);
+    return await readCosJsonFileWithRetry(preferred).catch(error => {
+      console.warn('读取旧版命名的用户绘本目录失败（忽略，按不存在处理）:', preferred, error);
+      return null;
+    });
   } catch (error) {
-    console.warn('获取最新用户绘本目录失败:', error);
+    console.warn('获取最新用户绘本目录失败（旧版文件名兜底查找阶段，忽略）:', error);
     return null;
   }
 }
@@ -675,14 +726,37 @@ app.get('/api/cos/auth', authenticate, (req, res) => {
 app.get('/api/library', authenticate, async (req, res) => {
   try {
     if (!cosConfigured) return res.json({ tree: [], collapsed: [], selectedFolderId: null, currentStoryId: null });
-    const cosSnapshot = await getLatestLibraryFromCos(req.user.username);
+    const safeUsername = sanitizeUsername(req.user.username).replace(/_+$/g, '') || 'guest';
+    let cosSnapshot = null;
+    let readError = null;
+    try {
+      cosSnapshot = await getLatestLibraryFromCos(req.user.username);
+    } catch (error) {
+      readError = error;
+    }
     if (cosSnapshot && Array.isArray(cosSnapshot.tree)) {
+      cacheLibrarySnapshot(safeUsername, cosSnapshot);
       return res.json({
         tree: cosSnapshot.tree,
         collapsed: Array.isArray(cosSnapshot.collapsed) ? cosSnapshot.collapsed : [],
         selectedFolderId: cosSnapshot.selectedFolderId || null,
         currentStoryId: cosSnapshot.currentStoryId || null
       });
+    }
+    if (readError) {
+      console.error('读取用户绘本目录失败（多次重试后仍失败，尝试内存缓存兜底）:', req.user.username, readError && (readError.code || readError.message || readError));
+      const cached = getCachedLibrarySnapshot(safeUsername);
+      if (cached) {
+        return res.json({
+          tree: Array.isArray(cached.snapshot.tree) ? cached.snapshot.tree : [],
+          collapsed: Array.isArray(cached.snapshot.collapsed) ? cached.snapshot.collapsed : [],
+          selectedFolderId: cached.snapshot.selectedFolderId || null,
+          currentStoryId: cached.snapshot.currentStoryId || null,
+          stale: true,
+          cachedAt: cached.cachedAt
+        });
+      }
+      return res.status(503).json({ error: '绘本目录暂时无法读取，请稍后重试' });
     }
     return res.json({ tree: [], collapsed: [], selectedFolderId: null, currentStoryId: null });
   } catch (error) {
@@ -702,6 +776,13 @@ app.put('/api/library', authenticate, async (req, res) => {
       currentStoryId: req.body.currentStoryId || null
     });
     if (!result) return res.status(500).json({ error: '同步用户绘本目录到 COS 失败' });
+    const safeUsername = sanitizeUsername(req.user.username).replace(/_+$/g, '') || 'guest';
+    cacheLibrarySnapshot(safeUsername, {
+      tree,
+      collapsed,
+      selectedFolderId: req.body.selectedFolderId || null,
+      currentStoryId: req.body.currentStoryId || null
+    });
     res.json({ ok: true, key: result.key, url: result.url });
   } catch (error) {
     sendDatabaseError(res, error);

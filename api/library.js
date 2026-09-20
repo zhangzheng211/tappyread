@@ -194,7 +194,7 @@ function readCosJsonFile(key) {
     return Promise.resolve(null);
   }
 
-  return new Promise(resolve => {
+  return new Promise((resolve, reject) => {
     cosClient.getObject(
       {
         Bucket: COS_BUCKET,
@@ -210,9 +210,16 @@ function readCosJsonFile(key) {
             return resolve(null);
           }
 
-          console.warn('读取 COS 绘本目录异常:', err);
+          // 🆕 关键修复（问题一：禁止超时回退 start.json）：ETIMEDOUT / 网络异常
+          // 等"这次没读到"绝不能当成"文件不存在"处理——之前这里统一 resolve(null)，
+          // 上层代码没法区分"新用户没有文件"和"老用户的文件这次读取失败了"，
+          // 于是老用户一遇到 COS 超时就会被误判成新用户，被 start.json 模板覆盖、
+          // 还会自动保存回云端，把真实数据永久顶掉。现在改成 reject，让调用方
+          // 必须显式处理"读取失败"这种情况（重试 / 走缓存 / 报错），不能再静默
+          // 当成"不存在"。
+          console.warn('读取 COS 绘本目录异常:', key, err && (err.code || err.message || err));
 
-          return resolve(null);
+          return reject(err);
         }
 
         try {
@@ -227,13 +234,78 @@ function readCosJsonFile(key) {
             text ? JSON.parse(text) : null
           );
         } catch (error) {
-          console.warn('解析 COS 绘本目录失败:', error);
+          console.warn('解析 COS 绘本目录失败:', key, error);
 
-          return resolve(null);
+          // JSON 解析失败同理：这是"这次读取有问题"（文件可能正在被并发写入、
+          // 或者内容损坏），不是"文件不存在"，也要抛出而不是当成空目录。
+          return reject(error);
         }
       }
     );
   });
+}
+
+// 🆕 问题三：/api/library 读取增加重试机制。COS 偶发的网络抖动/超时通常在
+// 短暂等待后重试就能成功，不需要立刻判定为失败。只有重试次数用尽仍然失败，
+// 才会把错误继续向上抛出（由调用方决定是走本地缓存兜底还是直接报错，见下方
+// GET 处理逻辑），全程不会把"重试后仍失败"当成"文件不存在"。
+async function readCosJsonFileWithRetry(key, retries = 2, delayMs = 500) {
+  let lastError = null;
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await readCosJsonFile(key);
+    } catch (error) {
+      lastError = error;
+
+      if (attempt < retries) {
+        console.warn(
+          `读取 COS 绘本目录失败，${delayMs * (attempt + 1)}ms 后重试（第 ${attempt + 1}/${retries} 次重试）:`,
+          key
+        );
+
+        await new Promise(resolve => setTimeout(resolve, delayMs * (attempt + 1)));
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+// 🆕 问题二：COS 绘本目录的本地（进程内存）缓存。Vercel 的同一个 Serverless
+// 容器在短时间内会被复用处理多个请求，这个内存缓存能在容器存活期间，把"最近
+// 一次成功读取/保存到的用户目录"留一份底，用于 COS 读取失败时的兜底：宁可给
+// 用户看一份"可能不是最新"的真实数据，也绝不能给一份"完全无关"的 start.json
+// 默认模板。
+// 注意：这只是单个容器内的尽力而为缓存，不跨容器共享、冷启动后也会清空——
+// 它不能替代"COS 里的数据才是唯一真相"这个前提，只是为了降低偶发网络问题对
+// 用户体验的影响。
+const libraryMemoryCache = new Map(); // safeUsername -> { snapshot, cachedAt }
+const LIBRARY_CACHE_MAX_ENTRIES = 500; // 简单的容量上限，避免单个容器长期运行、服务很多不同用户时无限占用内存
+const LIBRARY_CACHE_MAX_AGE_MS = 6 * 60 * 60 * 1000; // 缓存超过 6 小时视为太旧，不再作为兜底使用（正常情况下容器早就被回收了，这里只是双重保险）
+
+function cacheLibrarySnapshot(safeUsername, snapshot) {
+  if (!safeUsername || !snapshot) return;
+
+  if (
+    libraryMemoryCache.size >= LIBRARY_CACHE_MAX_ENTRIES &&
+    !libraryMemoryCache.has(safeUsername)
+  ) {
+    const oldestKey = libraryMemoryCache.keys().next().value;
+    if (oldestKey !== undefined) libraryMemoryCache.delete(oldestKey);
+  }
+
+  libraryMemoryCache.set(safeUsername, { snapshot, cachedAt: Date.now() });
+}
+
+function getCachedLibrarySnapshot(safeUsername) {
+  const entry = libraryMemoryCache.get(safeUsername);
+  if (!entry) return null;
+  if (Date.now() - entry.cachedAt > LIBRARY_CACHE_MAX_AGE_MS) {
+    libraryMemoryCache.delete(safeUsername);
+    return null;
+  }
+  return entry;
 }
 
 async function getLatestLibraryFromCos(username) {
@@ -244,18 +316,22 @@ async function getLatestLibraryFromCos(username) {
 
   const directKey = `${COS_JSON_DIR}/${safeUsername}.json`;
 
-  // 快速路径：
+  // 快速路径（带重试）：
   // 绝大多数情况下，文件就在标准的
   // json/{username}.json。
   //
-  // 直接 GET 一次即可，不需要先列 json/ 目录。
-  const direct = await readCosJsonFile(directKey);
+  // 直接 GET 一次（失败自动重试）即可，不需要先列 json/ 目录。
+  // 🆕 这里不再 catch 吞掉异常：readCosJsonFileWithRetry 重试用尽后仍然失败，
+  // 会把错误继续向上抛出给 GET 处理逻辑，由它决定走内存缓存兜底还是报错，
+  // 绝不能在这里静默当成"文件不存在"。
+  const direct = await readCosJsonFileWithRetry(directKey);
 
   if (direct) return direct;
 
-  // 仅当标准文件不存在时，才兼容旧版文件名。
-  // 注意：这个 fallback 可能触发 COS getBucket，
-  // 但正常新用户和正常保存流程不会走这里。
+  // direct === null：说明标准文件"确认不存在"（不是读取失败），才尝试兼容
+  // 旧版文件名。这个 fallback 本身允许失败时静默返回 null——它只是一个
+  // "万一有旧文件"的尽力而为兜底，不是判断"用户是否存在数据"的权威依据
+  // （权威判断已经在上面 directKey 的读取里做完了）。
   try {
     const keys = await listCosKeys(`${COS_JSON_DIR}/`);
 
@@ -277,9 +353,12 @@ async function getLatestLibraryFromCos(username) {
 
     if (!preferred) return null;
 
-    return await readCosJsonFile(preferred);
+    return await readCosJsonFileWithRetry(preferred).catch(error => {
+      console.warn('读取旧版命名的用户绘本目录失败（忽略，按不存在处理）:', preferred, error);
+      return null;
+    });
   } catch (error) {
-    console.warn('获取最新用户绘本目录失败:', error);
+    console.warn('获取最新用户绘本目录失败（旧版文件名兜底查找阶段，忽略）:', error);
 
     return null;
   }
@@ -288,9 +367,12 @@ async function getLatestLibraryFromCos(username) {
 async function getStartLibraryFromCos() {
   if (!cosConfigured) return null;
 
-  const snapshot = await readCosJsonFile(
+  const snapshot = await readCosJsonFileWithRetry(
     `${COS_JSON_DIR}/start.json`
-  );
+  ).catch(error => {
+    console.warn('读取 start.json 模板失败（重试后仍失败，返回空目录）:', error);
+    return null;
+  });
 
   return snapshot && Array.isArray(snapshot.tree)
     ? snapshot
@@ -426,13 +508,28 @@ export default async function handler(req, res) {
         });
       }
 
-      const snapshot =
-        await getLatestLibraryFromCos(user.username);
+      const safeUsername =
+        sanitizeUsername(user.username).replace(/_+$/g, '') || 'guest';
+
+      // 🆕 问题一（最严重，优先解决）：明确区分"这次读取失败了"（网络超时/
+      // COS 异常等，reject）和"用户自己的目录文件确认不存在"（resolve null）。
+      // 前者绝不能当成新用户处理，即使重试用尽仍然失败，也只会走内存缓存
+      // 兜底或报错，不会再静默换成 start.json 默认模板去覆盖用户的真实数据。
+      let snapshot = null;
+      let readError = null;
+      try {
+        snapshot = await getLatestLibraryFromCos(user.username);
+      } catch (error) {
+        readError = error;
+      }
 
       if (
         snapshot &&
         Array.isArray(snapshot.tree)
       ) {
+        // 读取成功：顺手更新内存缓存，供下次读取失败时兜底使用。
+        cacheLibrarySnapshot(safeUsername, snapshot);
+
         return sendJson(res, 200, {
           tree: snapshot.tree,
 
@@ -448,8 +545,38 @@ export default async function handler(req, res) {
         });
       }
 
-      // 当前用户没有 json/{username}.json：
-      // 直接读取 start.json 作为新用户初始目录。
+      if (readError) {
+        console.error(
+          '读取用户绘本目录失败（多次重试后仍失败，不会当成新用户处理，尝试内存缓存兜底）:',
+          user.username,
+          readError && (readError.code || readError.message || readError)
+        );
+
+        // 问题二：优先用本地（进程内存）缓存里最近一次成功读取/保存的真实数据
+        // 兜底，宁可给一份可能不是最新的真实数据，也绝不给 start.json 模板。
+        const cached = getCachedLibrarySnapshot(safeUsername);
+        if (cached) {
+          return sendJson(res, 200, {
+            tree: Array.isArray(cached.snapshot.tree) ? cached.snapshot.tree : [],
+            collapsed: Array.isArray(cached.snapshot.collapsed) ? cached.snapshot.collapsed : [],
+            selectedFolderId: cached.snapshot.selectedFolderId || null,
+            currentStoryId: cached.snapshot.currentStoryId || null,
+            stale: true,
+            cachedAt: cached.cachedAt
+          });
+        }
+
+        // 既没有读取成功，也没有可用的兜底缓存：如实报错，交给前端自己的
+        // 本地缓存（IndexedDB）/重试逻辑处理，绝不能在这里默默换成
+        // start.json——这正是本次要修复的问题。
+        return sendJson(res, 503, {
+          error: '绘本目录暂时无法读取，请稍后重试'
+        });
+      }
+
+      // 走到这里说明 snapshot === null 且没有抛出异常：
+      // 已经明确确认 json/{username}.json（及旧版命名文件）都不存在，
+      // 这才是真正的新用户，可以安全地读取 start.json 作为初始目录。
       const startSnapshot =
         await getStartLibraryFromCos().catch(
           () => null
@@ -539,6 +666,18 @@ export default async function handler(req, res) {
           error: '同步用户绘本目录到 COS 失败'
         });
       }
+
+      // 🆕 写入成功后同步更新内存缓存，保证同一容器内接下来的读取请求即使
+      // 遇到 COS 抖动，也能兜底拿到这次刚保存的最新数据，而不是更旧的缓存
+      // 或者（在问题一修复之前的行为）被误判成新用户。
+      const safeUsername =
+        sanitizeUsername(user.username).replace(/_+$/g, '') || 'guest';
+      cacheLibrarySnapshot(safeUsername, {
+        tree,
+        collapsed,
+        selectedFolderId: req.body.selectedFolderId || null,
+        currentStoryId: req.body.currentStoryId || null
+      });
 
       return sendJson(res, 200, {
         ok: true,
