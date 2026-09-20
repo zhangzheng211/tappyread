@@ -378,6 +378,34 @@ async function getLatestLibraryFromCos(username) {
   }
 }
 
+function withTimeout(promise, ms, errorMessage) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(errorMessage || `操作超时（${ms}ms）`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+// 🆕 COS 写入增加应用层超时保护（8s）+ 1 次重试：cosClient 自身的 Timeout
+// 配置对"连接阶段就卡住"这类异常不一定生效，光靠它无法保证写入请求一定会
+// 在合理时间内失败。这里用 Promise.race 强制兜底，最坏情况下（8s + 0.5s +
+// 8s ≈ 16.5s）也能明确失败并返回错误，不会一直挂起。
+async function putCosTextObjectWithRetry(key, text, contentType, retries = 1, timeoutMs = 8000) {
+  let lastError = null;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await withTimeout(putCosTextObject(key, text, contentType), timeoutMs, 'COS 写入超时');
+    } catch (error) {
+      lastError = error;
+      console.warn(`写入 COS 绘本目录失败（第 ${attempt + 1}/${retries + 1} 次尝试）:`, key, error && (error.code || error.message || error));
+      if (attempt < retries) {
+        await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
+      }
+    }
+  }
+  throw lastError;
+}
+
 async function syncLibraryToCos(username, snapshot) {
   if (!cosConfigured || !username) return null;
   try {
@@ -392,7 +420,7 @@ async function syncLibraryToCos(username, snapshot) {
       currentStoryId: snapshot?.currentStoryId || null
     };
 
-    await putCosTextObject(canonicalKey, JSON.stringify(payload, null, 2), 'application/json; charset=utf-8');
+    await putCosTextObjectWithRetry(canonicalKey, JSON.stringify(payload, null, 2), 'application/json; charset=utf-8');
 
     const allKeys = await listCosKeys(`${COS_JSON_DIR}/`);
     const staleKeys = getLegacyLibraryKeysForUsername(username, allKeys).filter(key => key !== canonicalKey);

@@ -386,6 +386,14 @@ function sendCosConfigError(res) {
   });
 }
 
+function withTimeout(promise, ms, errorMessage) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(errorMessage || `操作超时（${ms}ms）`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 function putCosTextObject(
   key,
   text,
@@ -408,6 +416,48 @@ function putCosTextObject(
         err ? reject(err) : resolve(data)
     );
   });
+}
+
+// 🆕 问题：PUT /api/library（前端直传 COS 失败后的后端中转兜底）偶发触发
+// Vercel 的 FUNCTION_INVOCATION_TIMEOUT（504，30 秒硬超时）。根因是
+// cosClient 的 Timeout 配置对"连接阶段就卡住"（如 ETIMEDOUT）这类异常
+// 不一定生效——SDK 层面的 putObject 调用可能一直不回调，光靠 cosClient
+// 自己的 Timeout 选项无法保证。这里用 Promise.race 在应用层强制加一道
+// 兜底超时（8 秒），配合一次重试，确保最坏情况下（8s + 0.5s 等待 + 8s ≈
+// 16.5s）也远低于 Vercel 30 秒的硬限制，会先得到一个明确的错误响应，
+// 而不是被 Vercel 直接杀死连接、前端只能看到语焉不详的 504。
+async function putCosTextObjectWithRetry(
+  key,
+  text,
+  contentType = 'application/json; charset=utf-8',
+  retries = 1,
+  timeoutMs = 8000
+) {
+  let lastError = null;
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await withTimeout(
+        putCosTextObject(key, text, contentType),
+        timeoutMs,
+        'COS 写入超时'
+      );
+    } catch (error) {
+      lastError = error;
+
+      console.warn(
+        `写入 COS 绘本目录失败（第 ${attempt + 1}/${retries + 1} 次尝试）:`,
+        key,
+        error && (error.code || error.message || error)
+      );
+
+      if (attempt < retries) {
+        await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
+      }
+    }
+  }
+
+  throw lastError;
 }
 
 function deleteCosObjects(keys) {
@@ -475,8 +525,8 @@ async function syncLibraryToCos(username, snapshot) {
       snapshot?.currentStoryId || null
   };
 
-  // 正常保存只做一次 PUT。
-  await putCosTextObject(
+  // 正常保存只做一次 PUT（内部已带超时保护 + 1 次重试，见 putCosTextObjectWithRetry）。
+  await putCosTextObjectWithRetry(
     canonicalKey,
     JSON.stringify(payload, null, 2),
     'application/json; charset=utf-8'
@@ -648,18 +698,33 @@ export default async function handler(req, res) {
         });
       }
 
-      const result =
-        await syncLibraryToCos(
+      let result;
+      try {
+        result =
+          await syncLibraryToCos(
+            user.username,
+            {
+              tree,
+              collapsed,
+              selectedFolderId:
+                req.body.selectedFolderId || null,
+              currentStoryId:
+                req.body.currentStoryId || null
+            }
+          );
+      } catch (error) {
+        // 🆕 syncLibraryToCos 内部的 COS 写入已经带了应用层超时（8s）+ 1 次重试，
+        // 最坏情况下也会在 ~17s 左右明确失败，不会一直挂到 Vercel 30 秒硬超时
+        // 才被杀掉、前端只看到语焉不详的 504。这里给出明确的错误信息。
+        console.error(
+          '同步用户绘本目录到 COS 失败（写入端已重试仍失败）:',
           user.username,
-          {
-            tree,
-            collapsed,
-            selectedFolderId:
-              req.body.selectedFolderId || null,
-            currentStoryId:
-              req.body.currentStoryId || null
-          }
+          error && (error.code || error.message || error)
         );
+        return sendJson(res, 502, {
+          error: '同步用户绘本目录到 COS 失败，请稍后重试'
+        });
+      }
 
       if (!result) {
         return sendJson(res, 500, {
