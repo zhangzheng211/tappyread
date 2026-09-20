@@ -5260,15 +5260,17 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
     }
 
     async function recognizeGrabText(dataUrl) {
-        const worker = await getGrabTextWorker();
-        if (!worker) throw new Error('OCR引擎未就绪，请检查网络连接（Tesseract.js 未能加载）');
-        const { data } = await worker.recognize(dataUrl);
-        const raw = (data && data.text) ? data.text : '';
-        return formatTtsText(raw
-            .replace(/\r\n/g, '\n')
-            .replace(/[ \t]+\n/g, '\n')
-            .replace(/\n{3,}/g, '\n\n')
-            .trim());
+    const worker = await getGrabTextWorker();
+    if (!worker) throw new Error('OCR引擎未就绪，请检查网络连接（Tesseract.js 未能加载）');
+    const { data } = await worker.recognize(dataUrl);
+    const raw = (data && data.text) ? data.text : '';
+    return formatTtsText(correctOcrChars(   // ← 新增 correctOcrChars 包裹
+        raw
+        .replace(/\r\n/g, '\n')
+        .replace(/[ \t]+\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim()
+    ));
     }
 
     // ---- 屏幕坐标 → 图片自然像素坐标（自动适配 object-fit:contain 的实际渲染区域） ----
@@ -6993,7 +6995,44 @@ nextBtn.addEventListener('click', function() {
         return result;
     }
 
+    /* =====================================================================
+   OCR 字符修正函数 —— 集中处理识别易混淆的字符
+   ---------------------------------------------------------------------
+   识别结果中常见的字符混淆（尤其 Tesseract 对绘本字体的识别）：
+     |  → I     （竖线误认为大写字母 I，如 "| am" → "I am"）
+     l  → I     （小写 L 误认为大写 I，如 "l am" → "I am"）
+     rn → m     （两个字母被连读，如 "rnom" → "mom"）
+     0  → O     （数字零误认为大写字母 O，视上下文）
+     1  → I/l   （数字一误认为字母，视上下文）
+   可根据实际遇到的情况继续往 corrections 里追加规则。
+   ===================================================================== */
+function correctOcrChars(text) {
+    if (!text || typeof text !== 'string') return '';
 
+    let result = text;
+
+    // ---- 规则 1：竖线 "|" → 大写 I ----
+    // 单词边界处的竖线几乎一定是字母 I（如 "| am" / "|t" / "yes, | do"）
+    // 用 \b 无法直接匹配 |（它本身是非单词字符），所以用前后为
+    // 空格/标点/字符串边界的方式判断
+    // result = result.replace(/(^|[\s.,!?;:'"()\[\]{}—–-])\|(?=$|[\s.,!?;:'"()\[\]{}—–-])/g, '$1I');
+
+    // 兜底：单独一个 "|" 或紧贴单词的 "|"（如 "|am"）也替换为 I
+    result = result.replace(/\|/g, 'I');
+
+    // ---- 规则 2：小写 l 单独成词或句首 → 大写 I ----
+    // 单独出现的 "l"（前后是空格/标点）几乎一定是 I
+    // result = result.replace(/(^|[\s.,!?;:'"()\[\]{}—–-])l(?=$|[\s.,!?;:'"()\[\]{}—–-])/g, '$1I');
+
+    // ---- 规则 3：其他可继续追加的规则 ----
+    // 例如：
+    // result = result.replace(/0(?=[a-zA-Z])/g, 'O');   // 数字0后跟字母 → O
+    // result = result.replace(/(?<=[a-zA-Z])0/g, 'o');  // 字母后跟0 → o
+    // result = result.replace(/\b1\b/g, 'I');           // 单独一个1 → I
+    // result = result.replace(/rn(?=[aeiou])/g, 'm');   // rn+元音 → m（如 rnom→mom）
+
+    return result;
+}
 
     // =====================================================
     // OCR/TTS文本统一格式化
@@ -7084,15 +7123,16 @@ nextBtn.addEventListener('click', function() {
     }
 
     async function getOcrWorker() {
-        if (ocrWorker) return ocrWorker;
-        ocrStatusText.textContent = '正在准备文字识别引擎（首次使用需下载英文语言包，请稍候）…';
-        ocrWorker = await Tesseract.createWorker('eng');
-        await ocrWorker.setParameters({
-            tessedit_pageseg_mode: '6',
-            tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,'!?-" + '"',
-            tessedit_ocr_engine_mode: '2'
-        });
-        return ocrWorker;
+    if (ocrWorker) return ocrWorker;
+    ocrStatusText.textContent = '正在准备文字识别引擎（首次使用需下载英文语言包，请稍候）…';
+    ocrWorker = await Tesseract.createWorker('eng');
+    await ocrWorker.setParameters({
+        tessedit_pageseg_mode: '6',        // 与抓取文字一致：按整块文字
+        preserve_interword_spaces: '1'     // 与抓取文字一致：保留词间空格
+        // 注意：这里去掉了原 OCR 的 tessedit_char_whitelist，
+        //      因为抓取文字不限制字符集，白名单会滤掉合法字符（如引号、数字等）
+    });
+    return ocrWorker;
     }
 
     // ===== 优化的图像裁剪 - 多区域尝试 =====
@@ -7125,35 +7165,34 @@ nextBtn.addEventListener('click', function() {
         return canvas.toDataURL('image/jpeg', 0.9);
     }
 
-    // ===== 优化的单图识别 =====
-    async function recognizeSingleImage(dataUrl, worker) {
-        const regions = [
-            { bottom: 0.25, top: 0.02 },
-            { bottom: 0.20, top: 0.05 },
-            { bottom: 0.30, top: 0.02 }
-        ];
-        
-        let bestText = '';
-        let bestScore = -999;
-        
-        for (const region of regions) {
-            try {
-                const cropUrl = await cropRegionOptimized(dataUrl, region.bottom, region.top);
-                const { data } = await worker.recognize(cropUrl);
-                const rawText = data && data.text ? data.text : '';
-                const cleaned = formatTtsText(cleanOcrTextEnhanced(rawText));
-                if (cleaned) {
-                    const score = scoreTextQuality(cleaned);
-                    if (score > bestScore) {
-                        bestScore = score;
-                        bestText = cleaned;
-                    }
-                }
-            } catch(e) {
-            }
-        }
-        
-        return bestText;
+    /* =====================================================================
+   单图 OCR 识别 —— 改为复用「抓取文字」的识别逻辑
+   ---------------------------------------------------------------------
+   与 getGrabTextWorker 使用同样的参数（无字符白名单），输入整张图片，
+   先做放大 + 灰度 + 对比度拉伸，再交给 Tesseract 识别。
+   ===================================================================== */
+async function recognizeSingleImage(dataUrl, worker) {
+    // 抓取文字使用的是"整图 + 增强"的处理方式，这里保持一致：
+    // 用 cropAndEnhanceForGrabText 的等价处理（整图，不裁剪）
+    const img = await loadImageEl(dataUrl);
+    const enhancedDataUrl = cropAndEnhanceForGrabText(
+        img,
+        0, 0,                 // 整图起点
+        img.naturalWidth,     // 整图宽度
+        img.naturalHeight     // 整图高度
+    );
+
+    const { data } = await worker.recognize(enhancedDataUrl);
+    const raw = (data && data.text) ? data.text : '';
+    // 与抓取文字完全一致的后处理顺序：
+    // 先清理换行/空白 → correctOcrChars 修正字符 → formatTtsText 格式化标点
+    return formatTtsText(correctOcrChars(
+        raw
+        .replace(/\r\n/g, '\n')
+        .replace(/[ \t]+\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim()
+    ));
     }
 
     async function recognizeItemsOptimized(items, concurrency = 4) {
@@ -7220,10 +7259,9 @@ nextBtn.addEventListener('click', function() {
             try {
                 const results = await recognizeItemsOptimized(itemsToProcess, 4);
                 itemsToProcess.forEach((item, idx) => {
-                    const text = results[idx] || '';
-                    const finalText = cleanOcrTextEnhanced(text);
-                    item.text = finalText;
-                    item.status = finalText ? 'done' : 'error';
+                const text = results[idx] || '';
+                item.text = text;                    // text 已经是 recognizeSingleImage 返回的最终结果
+                item.status = text ? 'done' : 'error';
                 });
                 ocrStatusText.textContent = '✅ 识别完成，已智能过滤乱码。点击图片可预览大图。';
             } catch (err) {
