@@ -7,7 +7,7 @@ const COS_REGION = process.env.COS_REGION || 'ap-guangzhou';
 
 const COS_JSON_DIR = (process.env.COS_JSON_DIR || 'json').replace(/\/+$/, '');
 
-const COS_BASE_URL = `https://${COS_BUCKET}.cos.${COS_REGION}.tencentcos.cn/`;
+const COS_BASE_URL = `https://${COS_BUCKET}.cos.${COS_REGION}.myqcloud.com/`;
 
 const cosConfigured = Boolean(
   process.env.COS_SECRET_ID && process.env.COS_SECRET_KEY
@@ -29,7 +29,7 @@ const cosClient = cosConfigured
       SecretKey: process.env.COS_SECRET_KEY,
 
       // 强制使用标准 COS 域名
-      Domain: `${COS_BUCKET}.cos.${COS_REGION}.tencentcos.cn`,
+      Domain: `${COS_BUCKET}.cos.${COS_REGION}.myqcloud.com`,
 
       // Vercel跨区域访问增加超时时间
       Timeout: 10000
