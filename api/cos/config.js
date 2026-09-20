@@ -1,5 +1,4 @@
 import { authenticate } from '../_mysql.js';
-import COS from 'cos-nodejs-sdk-v5';
 
 const COS_BUCKET = process.env.COS_BUCKET || 'tappyreadjpeg-1325106148';
 const COS_REGION = process.env.COS_REGION || 'ap-guangzhou';
@@ -8,26 +7,9 @@ const COS_HTML_DIR = (process.env.COS_HTML_DIR || 'html').replace(/\/+$/, '');
 const COS_JSON_DIR = (process.env.COS_JSON_DIR || 'json').replace(/\/+$/, '');
 const COS_TEMPLATE_KEY = process.env.COS_TEMPLATE_KEY || `${COS_JSON_DIR}/start.json`;
 const cosConfigured = Boolean(process.env.COS_SECRET_ID && process.env.COS_SECRET_KEY);
-const cosClient = cosConfigured ? new COS({SecretId: process.env.COS_SECRET_ID, SecretKey: process.env.COS_SECRET_KEY, Timeout: 3000}) : null;
 
 function sendJson(res, status, body) {
   res.status(status).setHeader('Content-Type', 'application/json; charset=utf-8').end(JSON.stringify(body));
-}
-
-function objectExists(Key) {
-  return new Promise(resolve => {
-    if(!cosClient) return resolve(true); // 无法判断时保守当作"存在"，避免误触发模板覆盖
-    cosClient.headObject({Bucket:COS_BUCKET, Region:COS_REGION, Key}, err => {
-      if(!err) return resolve(true);
-      const status = Number(err.statusCode || err.status || 0);
-      const code = String(err.code || '').toLowerCase();
-      if(status === 404 || code === 'nosuchkey' || code === 'notfound') return resolve(false);
-      // 🆕 超时/网络异常等其它错误不能当成"文件不存在"，否则会被误判为新用户、
-      // 被 start.json 模板覆盖真实数据。宁可保守地认为"存在"。
-      console.warn('检测 COS 对象是否存在时出错，保守当作存在处理:', Key, err);
-      resolve(true);
-    });
-  });
 }
 
 function sanitizeUsername(name) {
@@ -44,7 +26,15 @@ export default async function handler(req, res) {
     if (!user) return sendJson(res, 401, { error: '未登录或登录已过期' });
     const safeUsername = sanitizeUsername(user.username).replace(/_+$/g, '') || 'guest';
     const jsonKey = `${COS_JSON_DIR}/${safeUsername}.json`;
-    const userLibraryExists = cosConfigured ? await objectExists(jsonKey).catch(() => true) : true;
+    // 🆕 不再对 jsonKey 做 headObject 存在性探测：这个探测本身要访问 COS
+    // （Vercel 跨区域访问广州 COS 偶发 ETIMEDOUT，单次探测可能耗时 10+ 秒，
+    // 是日志里"检测 COS 对象是否存在时出错"这条警告刷屏、以及本接口响应
+    // 变慢的直接原因）。而且这个探测结果现在已经没有任何代码在依赖了——
+    // 前端 loadRemoteLibrary() 的兜底逻辑已经改成不管这个标记，总是直接
+    // 尝试读取用户自己的文件，只有明确收到 404 才会改用 start.json 模板
+    // （见 tappyread.html 相关改造）。继续做这次探测只有成本、没有收益，
+    // 所以直接去掉，userLibraryExists 固定返回 true 仅作字段兼容保留。
+    const userLibraryExists = true;
     return sendJson(res, 200, {
       enabled: cosConfigured,
       bucket: COS_BUCKET,
