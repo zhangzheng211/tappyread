@@ -620,6 +620,9 @@
         /* 抓取文字结果弹框支持拖动：只对这一个弹框生效，不影响其它弹窗 */
         #grabTextOverlay .modal-box{ cursor:default; }
         #grabTextOverlay .modal-header{ cursor:move; user-select:none; }
+        /* 🆕 打卡详情弹框同样支持拖动位置 */
+        #checkinModalOverlay .modal-box{ cursor:default; }
+        #checkinModalOverlay .modal-header{ cursor:move; user-select:none; }
         .grab-copied-toast{
             position:fixed; left:50%; bottom:36px; transform:translateX(-50%);
             background:var(--tent-navy); color:#fff; padding:8px 18px; border-radius:999px;
@@ -775,6 +778,105 @@
         }
         .pe-btn.save{ background:var(--leaf); }
         .pe-btn.cancel{ background:#9a90a8; }
+
+        /* ============ 🆕 打卡 / 跟读录音入口图标 ============
+           叠放在每页阅读区图片/HTML盒子的正下方，正好卡在与朗读文字条之间的
+           虚线分割线上（一半在图片区，一半探入文字条区），与截图参考位置一致。
+           imgBox/htmlBox 均为 position:relative 且默认 overflow:visible，
+           不会被 .page-panel 的 overflow:hidden 裁掉（仍完全落在 panel 总高度内）。 */
+        .page-checkin-badge{
+            position:absolute; left:50%; bottom:-17px; transform:translateX(-50%);
+            width:34px; height:34px; border-radius:50%;
+            background:var(--sunset-1); border:2px solid var(--tent-navy);
+            display:flex; align-items:center; justify-content:center;
+            font-size:15px; line-height:1; cursor:pointer; z-index:6;
+            box-shadow:0 3px 0 rgba(38,41,107,0.35);
+            transition: transform .1s ease, box-shadow .1s ease, background .15s ease;
+        }
+        .page-checkin-badge:active{ transform:translateX(-50%) translateY(2px); box-shadow:none; }
+        .page-checkin-badge.has-recordings{ background:var(--leaf); }
+        .page-img-box.grab-select-mode .page-checkin-badge{ pointer-events:none; opacity:.35; }
+
+        /* ============ 🆕 打卡详情弹窗（卡通浅黄色风格） ============ */
+        .checkin-modal-box .modal-body{ padding:16px 18px; gap:12px; background:var(--cream); border-radius:0 0 18px 18px; }
+        .checkin-meta{
+            display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px;
+            background:#fff; border:2px solid rgba(38,41,107,0.18); border-radius:14px;
+            padding:10px 14px;
+        }
+        .checkin-user{ font-family:'Baloo 2',sans-serif; font-weight:800; font-size:15px; color:var(--tent-navy); }
+        .checkin-date{ font-size:12.5px; font-weight:700; color:#8a7a58; }
+        .checkin-section-title{
+            font-family:'Baloo 2',sans-serif; font-weight:800; font-size:14px; color:var(--tent-navy);
+            display:flex; align-items:center; gap:6px; margin-top:2px;
+        }
+        .checkin-recordings-list{ display:flex; flex-direction:column; gap:10px; }
+        .checkin-empty-hint{
+            font-size:13px; font-weight:700; color:#a4936c; text-align:center;
+            padding:14px 8px; background:repeating-linear-gradient(135deg, rgba(255,201,60,0.12) 0 10px, transparent 10px 20px);
+            border-radius:12px; border:2px dashed rgba(38,41,107,0.2);
+        }
+        .checkin-rec-item{
+            display:flex; align-items:center; gap:10px;
+            background:#fff; border:2px solid rgba(38,41,107,0.16); border-radius:999px;
+            padding:6px 8px 6px 6px;
+        }
+        .rec-play-btn{
+            flex:none; width:32px; height:32px; border-radius:50%; cursor:pointer;
+            background:var(--clay); border:2px solid var(--tent-navy); color:#fff; font-size:12px;
+            display:flex; align-items:center; justify-content:center; box-shadow:0 2px 0 #a83f24;
+        }
+        .rec-play-btn:active{ transform:translateY(1px); box-shadow:none; }
+        .rec-progress-wrap{ flex:1; min-width:0; display:flex; align-items:center; }
+        .rec-progress{
+            width:100%; height:6px; -webkit-appearance:none; appearance:none;
+            background:linear-gradient(90deg, var(--sunset-1) 0%, var(--sunset-1) var(--rec-pct,0%), rgba(38,41,107,0.15) var(--rec-pct,0%));
+            border-radius:999px; outline:none; cursor:pointer;
+        }
+        .rec-progress::-webkit-slider-thumb{
+            -webkit-appearance:none; appearance:none; width:14px; height:14px; border-radius:50%;
+            background:#fff; border:2px solid var(--tent-navy); cursor:pointer;
+        }
+        .rec-progress::-moz-range-thumb{ width:14px; height:14px; border-radius:50%; background:#fff; border:2px solid var(--tent-navy); cursor:pointer; }
+        .rec-duration{ flex:none; font-size:12px; font-weight:800; color:var(--tent-navy); min-width:38px; text-align:right; }
+        .rec-owner{ flex:none; font-size:11px; font-weight:700; color:#a4936c; max-width:64px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .rec-delete-btn{
+            flex:none; width:26px; height:26px; border-radius:50%; cursor:pointer;
+            background:#fff; border:2px solid var(--danger); color:var(--danger); font-size:12px; font-weight:900;
+            display:flex; align-items:center; justify-content:center; line-height:1;
+        }
+        .rec-delete-btn:active{ transform:translateY(1px); }
+        .checkin-add-row{ display:flex; justify-content:center; margin-top:2px; }
+        .checkin-add-btn{
+            width:40px; height:40px; border-radius:50%; cursor:pointer;
+            background:var(--sunset-1); border:3px solid var(--tent-navy); color:var(--tent-navy);
+            font-size:20px; font-weight:900; display:flex; align-items:center; justify-content:center;
+            box-shadow:0 4px 0 rgba(38,41,107,0.3); line-height:1;
+        }
+        .checkin-add-btn:active{ transform:translateY(3px); box-shadow:none; }
+        .checkin-add-btn:disabled{ opacity:.4; cursor:not-allowed; }
+        .checkin-recorder{
+            display:flex; flex-direction:column; align-items:center; gap:10px;
+            background:#fff; border:2px dashed var(--clay); border-radius:16px; padding:14px;
+        }
+        .checkin-rec-indicator{
+            display:flex; align-items:center; gap:8px;
+            font-family:'Baloo 2',sans-serif; font-weight:800; font-size:16px; color:var(--tent-navy);
+        }
+        .rec-dot{ width:12px; height:12px; border-radius:50%; background:var(--danger); animation:recPulse 1s ease-in-out infinite; }
+        .checkin-rec-indicator.paused .rec-dot{ animation:none; opacity:.4; }
+        @keyframes recPulse{ 0%,100%{ opacity:1; transform:scale(1); } 50%{ opacity:.4; transform:scale(0.8); } }
+        .checkin-rec-btns{ display:flex; gap:10px; }
+        .checkin-rec-btn{
+            font-family:'Baloo 2',sans-serif; font-weight:800; font-size:13px; cursor:pointer;
+            border-radius:999px; padding:8px 16px; border:2px solid var(--tent-navy); color:#fff;
+            box-shadow:0 3px 0 rgba(38,41,107,0.3);
+        }
+        .checkin-rec-btn:active{ transform:translateY(2px); box-shadow:none; }
+        .checkin-rec-btn.start-pause{ background:var(--tent-blue); min-width:52px; }
+        .checkin-rec-btn.finish{ background:var(--leaf); }
+        .checkin-rec-btn.cancel{ background:#9a90a8; }
+        .checkin-uploading-hint{ font-size:12px; font-weight:700; color:var(--tent-navy); text-align:center; }
 
         .modal-overlay{
             position:fixed; inset:0; background:rgba(20,18,40,0.55);
@@ -1237,12 +1339,12 @@ body.reader-fullscreen .stage-wrap {
             </div>
             <div class="right-group">
                 <button class="action-btn action-btn-pink" id="helpBtn">❓ 使用说明</button>
-                <button class="action-btn action-btn-teal" id="pdfConvertBtn">📄 PDF转图片</button>
+                <button class="action-btn action-btn-teal" id="pdfConvertBtn" style="display:none;">📄 PDF转图片</button>
                 <button class="action-btn action-btn-purple" id="resetSpeechBtn"  style="display:none;"">🔄 重置语音</button> <!-- ⬅️ 添加 style="display:none;"，如果要显示出来则修改style="display:inline-flex;" -->
-                <button class="action-btn action-btn-blue" id="newStoryBtn">📖 新增绘本</button>
-                <button class="add-page-btn" id="openAddModalBtn">➕ 添加图片绘本</button>
+                <button class="action-btn action-btn-blue" id="newStoryBtn" style="display:none;">📖 新增绘本</button>
+                <button class="add-page-btn" id="openAddModalBtn" style="display:none;">➕ 添加图片绘本</button>
                 <button class="action-btn action-btn-html" id="htmlGenerateBtn" style="display:none;">⚡ 添加HTML绘本</button>  <!-- ⬅️ 添加 style="display:none;"，如果要显示出来则修改style="display:inline-flex;" -->
-                <button class="action-btn action-btn-orange" id="imageBatchImportBtn">📦 图片批量生成</button>
+                <button class="action-btn action-btn-orange" id="imageBatchImportBtn" style="display:none;">📦 图片批量生成</button>
                 <button class="action-btn action-btn-primary" id="batchImportBtn">📦 PDF批量生成</button>
                 <button class="action-btn action-btn-orange" id="dirSettingBtn" style="display:none;">📁 目录配置</button>  <!-- ⬅️ 添加 style="display:none;"，如果要显示出来则修改style="display:inline-flex;" -->
                 <div class="voice-pill" title="朗读设置">
@@ -1826,6 +1928,39 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
             </div>
             <div class="modal-actions">
                 <button class="btn" id="cancelLocationBtn">取消</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============ Modal: 打卡详情 / 跟读录音 ============ -->
+<div class="modal-overlay" id="checkinModalOverlay">
+    <div class="modal-box narrow checkin-modal-box" style="max-width:440px;">
+        <div class="modal-header" style="background:var(--sunset-1);">
+            <h3 style="color:var(--tent-navy);">🎙️ 打卡详情</h3>
+            <button class="modal-close" id="closeCheckinModalBtn" style="color:var(--tent-navy);">✕</button>
+        </div>
+        <div class="modal-body">
+            <div class="checkin-meta">
+                <span class="checkin-user" id="checkinUserLabel">尚未打卡</span>
+                <span class="checkin-date" id="checkinDateLabel"></span>
+            </div>
+            <div class="checkin-section-title">01 &nbsp;朗读录音</div>
+            <div class="checkin-recordings-list" id="checkinRecordingsList"></div>
+            <div class="checkin-add-row" id="checkinAddRow">
+                <button class="checkin-add-btn" id="checkinAddBtn" title="添加朗读录音">＋</button>
+            </div>
+            <div class="checkin-recorder" id="checkinRecorderRow" style="display:none;">
+                <div class="checkin-rec-indicator" id="checkinRecIndicator">
+                    <span class="rec-dot"></span>
+                    <span id="checkinRecTimer">00:00</span>
+                </div>
+                <div class="checkin-rec-btns">
+                    <button class="checkin-rec-btn start-pause" id="checkinStartPauseBtn">▶️</button>
+                    <button class="checkin-rec-btn finish" id="checkinFinishBtn">✅ 完成</button>
+                    <button class="checkin-rec-btn cancel" id="checkinCancelRecBtn">✕ 取消</button>
+                </div>
+                <div class="checkin-uploading-hint" id="checkinUploadingHint" style="display:none;">⏳ 正在保存录音…</div>
             </div>
         </div>
     </div>
@@ -2436,6 +2571,29 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
         } catch (error) {
             console.warn('HTML COS 直传失败，回退后端中转：', error);
             return relayUploadToCos('/upload/html', { fileName: fileName || 'page.html', source });
+        }
+    }
+
+    // ============================================================
+    // 🆕 打卡跟读录音：COS 存储键计算 + 直传
+    // 存储目录固定为 AudioRecords/，按"绘本名称文件夹 + u{userId}_"两层前缀隔离，
+    // 与图片 jpeg/{绘本名}/u{id}_... 的越权校验逻辑完全一致，无需改动后端签名规则。
+    // ------------------------------------------------------------
+    function buildAudioCosKey(fileBaseName, storyName){
+        const folder = storyName ? sanitizeStoryNameForCosFolder(storyName) + '/' : '';
+        return 'AudioRecords/' + folder + 'u' + __userId + '_' + Date.now() + '_' + sanitizeNameForCos(fileBaseName || 'record.webm');
+    }
+
+    // 录音 Blob 直传 COS：优先浏览器直传（走 cosPutDirect，与图片/HTML 同一套签名机制）
+    async function uploadAudioRecordingToCos(blob, fileBaseName, storyName, onProgress){
+        if(!blob || !blob.size) return null;
+        try {
+            const key = buildAudioCosKey(fileBaseName, storyName);
+            const contentType = blob.type || 'audio/webm';
+            return await cosPutDirect(key, blob, contentType, onProgress);
+        } catch(e) {
+            console.warn('录音上传到 COS 失败：', e);
+            return null;
         }
     }
 
@@ -3543,6 +3701,13 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
             .filter(Boolean)));
         if (cosKeys.length > 0) {
             deleteCosKeys(cosKeys);
+        }
+        // 🆕 顺带清理该绘本每一页的打卡跟读录音，避免 COS 里留下孤儿录音文件
+        const audioKeys = Array.from(new Set((story.pages || [])
+            .flatMap(p => (p.checkin && Array.isArray(p.checkin.recordings)) ? p.checkin.recordings.map(r => r.key) : [])
+            .filter(Boolean)));
+        if (audioKeys.length > 0) {
+            deleteCosKeys(audioKeys);
         }
 
         const parent = findParentNode(library, storyId);
@@ -4845,7 +5010,7 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
         }
         if(!confirm(`确定要删除第 ${pageIdx+1} 页吗？`)) return;
         const removedPage = story.pages[pageIdx];
-        const relatedKeys = [removedPage?.cosKey, removedPage?.htmlCosKey].filter(Boolean);
+        const relatedKeys = [removedPage?.cosKey, removedPage?.htmlCosKey, ...getPageCheckinAudioKeys(removedPage)].filter(Boolean);
         // 注意：fileCosKey 是整本原始文件的对象键，删除单页时不能删它（其他页还要用）
         if (relatedKeys.length > 0) {
             deleteCosKeys(relatedKeys);
@@ -4984,6 +5149,7 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
                 e.preventDefault();
                 toggleReaderFullscreen();
             });
+            htmlBox.appendChild(buildCheckinBadge(page, storyTitle, globalIndex));
             panel.appendChild(htmlBox);
 
             const htmlCaptionBar = document.createElement('div');
@@ -5078,6 +5244,7 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
             imgBox.appendChild(miss);
         });
         imgBox.appendChild(img);
+        imgBox.appendChild(buildCheckinBadge(page, storyTitle, globalIndex));
 
         const captionBar = document.createElement('div');
         captionBar.className = 'page-caption-bar';
@@ -5125,6 +5292,492 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
         panel.appendChild(imgBox);
         panel.appendChild(captionBar);
         return panel;
+    }
+
+    // ============================================================
+    // 🆕 打卡 / 跟读录音功能
+    // ------------------------------------------------------------
+    // 数据结构挂在 page.checkin 上，随绘本目录 JSON 一起同步到 COS，
+    // 不需要额外的数据库表；录音文件本身直传 COS 的 AudioRecords/ 目录。
+    // page.checkin = {
+    //   recordings: [
+    //     { id, key, url, username, duration, createdAt }
+    //   ]
+    // }
+    // ============================================================
+
+    function ensurePageCheckin(page){
+        if(!page.checkin || typeof page.checkin !== 'object' || Array.isArray(page.checkin)){
+            page.checkin = { recordings: [] };
+        }
+        if(!Array.isArray(page.checkin.recordings)) page.checkin.recordings = [];
+        return page.checkin;
+    }
+
+    // 取出某一页所有打卡录音的 COS 键，供删除页面/绘本时一并清理孤儿文件
+    function getPageCheckinAudioKeys(page){
+        if(!page || !page.checkin || !Array.isArray(page.checkin.recordings)) return [];
+        return page.checkin.recordings.map(r => r && r.key).filter(Boolean);
+    }
+
+    function getCurrentCheckinUsername(){
+        return localStorage.getItem('tappyread_username')
+            || localStorage.getItem('tappyread_last_user')
+            || (COS_DIRECT && COS_DIRECT.config && COS_DIRECT.config.username)
+            || '我';
+    }
+
+    function pad2(n){ return String(n).padStart(2, '0'); }
+
+    function formatCheckinDateTime(input){
+        const dt = input ? new Date(input) : new Date();
+        if(isNaN(dt.getTime())) return '';
+        return `${dt.getFullYear()}-${pad2(dt.getMonth()+1)}-${pad2(dt.getDate())} ${pad2(dt.getHours())}:${pad2(dt.getMinutes())}`;
+    }
+
+    function formatRecDuration(totalSeconds){
+        const sec = Math.max(0, Math.round(Number(totalSeconds) || 0));
+        return `${pad2(Math.floor(sec/60))}:${pad2(sec%60)}`;
+    }
+
+    // 打卡入口图标：叠放在阅读区图片/HTML盒子底部中间，正好卡在与朗读文字条的虚线分割线上
+    function buildCheckinBadge(page, storyTitle, globalIndex){
+        const badge = document.createElement('div');
+        badge.className = 'page-checkin-badge';
+        badge.title = '打卡 · 跟读录音';
+        const hasRecordings = !!(page.checkin && Array.isArray(page.checkin.recordings) && page.checkin.recordings.length);
+        if(hasRecordings) badge.classList.add('has-recordings');
+        badge.textContent = hasRecordings ? '✅' : '🎙️';
+        badge.dataset.checkinBadge = '1';
+        badge.addEventListener('click', (e)=>{
+            e.preventDefault();
+            e.stopPropagation();
+            openCheckinModal(page, storyTitle, globalIndex, badge);
+        });
+        return badge;
+    }
+
+    // ------------------------------------------------------------
+    // 弹窗：打卡详情（全局唯一实例，打开时按当前页上下文重新渲染）
+    // ------------------------------------------------------------
+    const checkinModalOverlay = document.getElementById('checkinModalOverlay');
+    const checkinModalBox = checkinModalOverlay.querySelector('.modal-box');
+    const checkinModalHeader = checkinModalOverlay.querySelector('.modal-header');
+    const checkinUserLabel = document.getElementById('checkinUserLabel');
+    const checkinDateLabel = document.getElementById('checkinDateLabel');
+    const checkinRecordingsList = document.getElementById('checkinRecordingsList');
+    const checkinAddRow = document.getElementById('checkinAddRow');
+    const checkinAddBtn = document.getElementById('checkinAddBtn');
+    const checkinRecorderRow = document.getElementById('checkinRecorderRow');
+    const checkinRecIndicator = document.getElementById('checkinRecIndicator');
+    const checkinRecTimer = document.getElementById('checkinRecTimer');
+    const checkinStartPauseBtn = document.getElementById('checkinStartPauseBtn');
+    const checkinFinishBtn = document.getElementById('checkinFinishBtn');
+    const checkinCancelRecBtn = document.getElementById('checkinCancelRecBtn');
+    const checkinUploadingHint = document.getElementById('checkinUploadingHint');
+    const closeCheckinModalBtn = document.getElementById('closeCheckinModalBtn');
+
+    // 当前打开弹窗对应的上下文（页面对象、绘本标题、页码、触发图标），随打开/关闭刷新
+    let checkinCtx = null;
+    // 当前活跃的录音会话（正在录音/暂停中），关闭弹窗或切换页面时会强制清理
+    let activeRecSession = null;
+    // 正在播放的 <audio> 实例，切换/新建播放时先停掉上一个
+    let checkinPlayingAudio = null;
+    let checkinPlayingBtn = null;
+
+    function stopCheckinPlayback(){
+        if(checkinPlayingAudio){
+            try{ checkinPlayingAudio.pause(); }catch(e){}
+            checkinPlayingAudio = null;
+        }
+        if(checkinPlayingBtn){
+            checkinPlayingBtn.textContent = '▶️';
+            checkinPlayingBtn = null;
+        }
+    }
+
+    function renderCheckinModal(){
+        if(!checkinCtx) return;
+        const { page } = checkinCtx;
+        const checkin = ensurePageCheckin(page);
+        const recordings = checkin.recordings;
+
+        if(recordings.length){
+            const users = Array.from(new Set(recordings.map(r => r.username).filter(Boolean)));
+            checkinUserLabel.textContent = users.length ? users.join(' 和 ') : '匿名';
+            const latest = recordings[recordings.length - 1];
+            checkinDateLabel.textContent = formatCheckinDateTime(latest.createdAt);
+        } else {
+            checkinUserLabel.textContent = '尚未打卡';
+            checkinDateLabel.textContent = '';
+        }
+
+        checkinRecordingsList.innerHTML = '';
+        if(!recordings.length){
+            const empty = document.createElement('div');
+            empty.className = 'checkin-empty-hint';
+            empty.textContent = '还没有朗读录音，点击下方 ＋ 开始第一次打卡吧～';
+            checkinRecordingsList.appendChild(empty);
+        } else {
+            recordings.forEach((rec) => {
+                checkinRecordingsList.appendChild(buildCheckinRecItem(rec));
+            });
+        }
+    }
+
+    function buildCheckinRecItem(rec){
+        const item = document.createElement('div');
+        item.className = 'checkin-rec-item';
+        item.dataset.recId = rec.id;
+
+        const playBtn = document.createElement('button');
+        playBtn.className = 'rec-play-btn';
+        playBtn.textContent = '▶️';
+        playBtn.type = 'button';
+
+        const progressWrap = document.createElement('div');
+        progressWrap.className = 'rec-progress-wrap';
+        const progress = document.createElement('input');
+        progress.type = 'range';
+        progress.className = 'rec-progress';
+        progress.min = '0'; progress.max = '1000'; progress.value = '0';
+        progressWrap.appendChild(progress);
+
+        const duration = document.createElement('span');
+        duration.className = 'rec-duration';
+        duration.textContent = formatRecDuration(rec.duration);
+
+        const owner = document.createElement('span');
+        owner.className = 'rec-owner';
+        owner.textContent = rec.username || '';
+        owner.title = rec.username || '';
+
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'rec-delete-btn';
+        deleteBtn.textContent = '✕';
+        deleteBtn.type = 'button';
+        deleteBtn.title = '删除这条录音';
+
+        item.appendChild(playBtn);
+        item.appendChild(progressWrap);
+        item.appendChild(duration);
+        item.appendChild(owner);
+        item.appendChild(deleteBtn);
+
+        let audioEl = null;
+        let seeking = false;
+
+        playBtn.addEventListener('click', ()=>{
+            if(audioEl && checkinPlayingAudio === audioEl){
+                // 当前正是这一条：切换播放/暂停
+                if(audioEl.paused){ audioEl.play().catch(()=>{}); playBtn.textContent = '⏸️'; checkinPlayingBtn = playBtn; }
+                else { audioEl.pause(); playBtn.textContent = '▶️'; }
+                return;
+            }
+            // 切到新的一条：先停掉别的
+            stopCheckinPlayback();
+            if(!audioEl){
+                audioEl = new Audio(rec.url || (COS_BASE + rec.key));
+                audioEl.addEventListener('timeupdate', ()=>{
+                    if(seeking || !audioEl.duration || !isFinite(audioEl.duration)) return;
+                    progress.value = String(Math.round((audioEl.currentTime / audioEl.duration) * 1000));
+                    duration.textContent = formatRecDuration(audioEl.duration - audioEl.currentTime > 0 ? (audioEl.duration - audioEl.currentTime) : 0);
+                });
+                audioEl.addEventListener('ended', ()=>{
+                    playBtn.textContent = '▶️';
+                    progress.value = '0';
+                    duration.textContent = formatRecDuration(rec.duration);
+                    if(checkinPlayingAudio === audioEl){ checkinPlayingAudio = null; checkinPlayingBtn = null; }
+                });
+                audioEl.addEventListener('error', ()=>{
+                    playBtn.textContent = '▶️';
+                    alert('录音加载失败，请检查网络后重试');
+                });
+            }
+            checkinPlayingAudio = audioEl;
+            checkinPlayingBtn = playBtn;
+            audioEl.play().catch(()=>{ alert('录音播放失败'); });
+            playBtn.textContent = '⏸️';
+        });
+
+        progress.addEventListener('input', ()=>{
+            seeking = true;
+            if(audioEl && audioEl.duration && isFinite(audioEl.duration)){
+                duration.textContent = formatRecDuration(audioEl.duration * (Number(progress.value) / 1000));
+            }
+        });
+        progress.addEventListener('change', ()=>{
+            if(audioEl && audioEl.duration && isFinite(audioEl.duration)){
+                audioEl.currentTime = audioEl.duration * (Number(progress.value) / 1000);
+            }
+            seeking = false;
+        });
+
+        deleteBtn.addEventListener('click', ()=>{
+            if(!confirm('确定删除这条朗读录音吗？此操作不可恢复。')) return;
+            if(audioEl){
+                if(checkinPlayingAudio === audioEl) stopCheckinPlayback();
+                audioEl.pause();
+            }
+            const { page, badge } = checkinCtx;
+            const checkin = ensurePageCheckin(page);
+            const idx = checkin.recordings.findIndex(r => r.id === rec.id);
+            if(idx !== -1) checkin.recordings.splice(idx, 1);
+            if(rec.key) deleteCosKeys([rec.key]);
+            renderCheckinModal();
+            refreshCheckinBadge(page, badge);
+            saveLibrary();
+        });
+
+        return item;
+    }
+
+    function refreshCheckinBadge(page, badge){
+        if(!badge) return;
+        const hasRecordings = !!(page.checkin && page.checkin.recordings && page.checkin.recordings.length);
+        badge.classList.toggle('has-recordings', hasRecordings);
+        badge.textContent = hasRecordings ? '✅' : '🎙️';
+    }
+
+    function openCheckinModal(page, storyTitle, globalIndex, badge){
+        checkinCtx = { page, storyTitle, globalIndex, badge };
+        resetRecorderUI();
+        renderCheckinModal();
+        checkinModalBox.style.transform = ''; // 每次打开都从居中位置开始，不记忆上次拖动的位置
+        checkinModalOverlay.classList.add('open');
+    }
+
+    function closeCheckinModal(){
+        stopCheckinPlayback();
+        if(activeRecSession){
+            cancelRecording();
+        }
+        checkinModalOverlay.classList.remove('open');
+        checkinCtx = null;
+    }
+
+    closeCheckinModalBtn.addEventListener('click', closeCheckinModal);
+    checkinModalOverlay.addEventListener('click', (e)=>{
+        if(e.target === checkinModalOverlay) closeCheckinModal();
+    });
+
+    // ---- 打卡详情弹框支持拖动位置 ----
+    // 原理与「抓取文字」弹框一致：弹框仍由 .modal-overlay 的 flex 居中布局定位，
+    // 拖动时只是给 .modal-box 叠加一个 CSS transform:translate() 偏移量，
+    // 松开鼠标后偏移量保留，直到下次重新打开弹框（openCheckinModal 里会复位）。
+    (function enableCheckinModalDrag(){
+        let dragging = false;
+        let startX = 0, startY = 0, baseX = 0, baseY = 0;
+
+        function getCurrentTranslate(){
+            const style = window.getComputedStyle(checkinModalBox);
+            const matrix = style.transform;
+            if (!matrix || matrix === 'none') return { x: 0, y: 0 };
+            const match = matrix.match(/matrix\(([^)]+)\)/);
+            if (!match) return { x: 0, y: 0 };
+            const parts = match[1].split(',').map(Number);
+            return { x: parts[4] || 0, y: parts[5] || 0 };
+        }
+
+        function beginDrag(clientX, clientY){
+            dragging = true;
+            startX = clientX;
+            startY = clientY;
+            const cur = getCurrentTranslate();
+            baseX = cur.x;
+            baseY = cur.y;
+        }
+
+        checkinModalHeader.addEventListener('mousedown', (e) => {
+            if (e.target.closest('.modal-close')) return; // 点关闭按钮时不触发拖动
+            beginDrag(e.clientX, e.clientY);
+            e.preventDefault();
+        });
+        document.addEventListener('mousemove', (e) => {
+            if (!dragging) return;
+            const dx = e.clientX - startX;
+            const dy = e.clientY - startY;
+            checkinModalBox.style.transform = `translate(${baseX + dx}px, ${baseY + dy}px)`;
+        });
+        document.addEventListener('mouseup', () => { dragging = false; });
+
+        // 移动端触屏同样支持拖动
+        checkinModalHeader.addEventListener('touchstart', (e) => {
+            if (e.target.closest('.modal-close')) return;
+            const t = e.touches[0];
+            beginDrag(t.clientX, t.clientY);
+        }, { passive: true });
+        document.addEventListener('touchmove', (e) => {
+            if (!dragging) return;
+            const t = e.touches[0];
+            const dx = t.clientX - startX;
+            const dy = t.clientY - startY;
+            checkinModalBox.style.transform = `translate(${baseX + dx}px, ${baseY + dy}px)`;
+        }, { passive: true });
+        document.addEventListener('touchend', () => { dragging = false; });
+    })();
+
+    // ------------------------------------------------------------
+    // 录音：开始 / 暂停 / 完成（循环开始暂停任意次数，只有"完成"才真正结束）
+    // ------------------------------------------------------------
+    function resetRecorderUI(){
+        checkinAddRow.style.display = '';
+        checkinRecorderRow.style.display = 'none';
+        checkinUploadingHint.style.display = 'none';
+        checkinStartPauseBtn.disabled = false;
+        checkinFinishBtn.disabled = false;
+        checkinStartPauseBtn.textContent = '▶️';
+        checkinRecTimer.textContent = '00:00';
+        checkinRecIndicator.classList.remove('paused');
+    }
+
+    function pickAudioMimeType(){
+        const candidates = [
+            'audio/webm;codecs=opus',
+            'audio/webm',
+            'audio/mp4',
+            'audio/aac',
+            'audio/ogg;codecs=opus'
+        ];
+        if(typeof MediaRecorder === 'undefined' || !MediaRecorder.isTypeSupported) return '';
+        for(const type of candidates){
+            if(MediaRecorder.isTypeSupported(type)) return type;
+        }
+        return '';
+    }
+
+    function extFromMimeType(mime){
+        if(/mp4/i.test(mime)) return 'm4a';
+        if(/aac/i.test(mime)) return 'aac';
+        if(/ogg/i.test(mime)) return 'ogg';
+        return 'webm';
+    }
+
+    checkinAddBtn.addEventListener('click', async ()=>{
+        if(!checkinCtx) return;
+        stopCheckinPlayback();
+        checkinAddBtn.disabled = true;
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const mimeType = pickAudioMimeType();
+            const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+            const chunks = [];
+            let elapsedMs = 0;
+            let segmentStart = 0;
+            let timerHandle = null;
+            let isPaused = false;
+
+            recorder.addEventListener('dataavailable', (e)=>{ if(e.data && e.data.size) chunks.push(e.data); });
+
+            function tick(){
+                const liveMs = elapsedMs + (isPaused ? 0 : (Date.now() - segmentStart));
+                checkinRecTimer.textContent = formatRecDuration(liveMs / 1000);
+            }
+            timerHandle = setInterval(tick, 250);
+            segmentStart = Date.now();
+
+            activeRecSession = {
+                stream, recorder, chunks,
+                getElapsedSeconds: () => (elapsedMs + (isPaused ? 0 : (Date.now() - segmentStart))) / 1000,
+                stopTimer: () => { if(timerHandle){ clearInterval(timerHandle); timerHandle = null; } }
+            };
+
+            recorder.start();
+            checkinAddRow.style.display = 'none';
+            checkinRecorderRow.style.display = 'flex';
+            checkinStartPauseBtn.textContent = '⏸️';
+            checkinRecIndicator.classList.remove('paused');
+
+            checkinStartPauseBtn.onclick = ()=>{
+                if(!activeRecSession) return;
+                if(!isPaused){
+                    recorder.pause();
+                    elapsedMs += Date.now() - segmentStart;
+                    isPaused = true;
+                    checkinStartPauseBtn.textContent = '▶️';
+                    checkinRecIndicator.classList.add('paused');
+                } else {
+                    recorder.resume();
+                    segmentStart = Date.now();
+                    isPaused = false;
+                    checkinStartPauseBtn.textContent = '⏸️';
+                    checkinRecIndicator.classList.remove('paused');
+                }
+            };
+
+            checkinCancelRecBtn.onclick = ()=>{ cancelRecording(); };
+
+            checkinFinishBtn.onclick = async ()=>{
+                if(!activeRecSession) return;
+                const durationSeconds = activeRecSession.getElapsedSeconds();
+                activeRecSession.stopTimer();
+                checkinStartPauseBtn.disabled = true;
+                checkinFinishBtn.disabled = true;
+                checkinCancelRecBtn.disabled = true;
+                checkinUploadingHint.style.display = '';
+
+                const finalize = async ()=>{
+                    stream.getTracks().forEach(t => t.stop());
+                    const blob = new Blob(chunks, { type: mimeType || (recorder.mimeType || 'audio/webm') });
+                    const { page, storyTitle, globalIndex, badge } = checkinCtx;
+                    const pageLabel = '第' + (globalIndex + 1) + '页';
+                    const dateLabel = formatCheckinDateTime().replace(/[\s:]/g, '');
+                    const ext = extFromMimeType(blob.type);
+                    const fileBaseName = `${sanitizeNameForCos(storyTitle || 'story')}_${pageLabel}_${dateLabel}.${ext}`;
+
+                    const result = await uploadAudioRecordingToCos(blob, fileBaseName, storyTitle);
+                    checkinUploadingHint.style.display = 'none';
+                    checkinCancelRecBtn.disabled = false;
+
+                    if(!result){
+                        alert('录音保存失败，请检查网络后重试');
+                        resetRecorderUI();
+                        activeRecSession = null;
+                        return;
+                    }
+
+                    const checkin = ensurePageCheckin(page);
+                    checkin.recordings.push({
+                        id: 'rec_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+                        key: result.key,
+                        url: result.url,
+                        username: getCurrentCheckinUsername(),
+                        duration: durationSeconds,
+                        createdAt: new Date().toISOString()
+                    });
+
+                    activeRecSession = null;
+                    resetRecorderUI();
+                    renderCheckinModal();
+                    refreshCheckinBadge(page, badge);
+                    saveLibrary();
+                };
+
+                if(recorder.state !== 'inactive'){
+                    recorder.addEventListener('stop', finalize, { once: true });
+                    recorder.stop();
+                } else {
+                    finalize();
+                }
+            };
+        } catch(err) {
+            console.warn('无法开始录音：', err);
+            alert('无法访问麦克风，请检查浏览器权限设置后重试');
+            resetRecorderUI();
+        } finally {
+            checkinAddBtn.disabled = false;
+        }
+    });
+
+    function cancelRecording(){
+        if(!activeRecSession) return;
+        try {
+            activeRecSession.stopTimer();
+            if(activeRecSession.recorder.state !== 'inactive') activeRecSession.recorder.stop();
+            activeRecSession.stream.getTracks().forEach(t => t.stop());
+        } catch(e){}
+        activeRecSession = null;
+        resetRecorderUI();
     }
 
     function startEditPageText(page, captionBar, captionText, editBtn){

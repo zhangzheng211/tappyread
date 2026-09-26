@@ -12,6 +12,9 @@ const COS_HTML_DIR = (process.env.COS_HTML_DIR || 'html').replace(/\/+$/, '');
 
 const COS_JSON_DIR = (process.env.COS_JSON_DIR || 'json').replace(/\/+$/, '');
 
+// 🆕 打卡跟读录音统一存储目录：AudioRecords/，按用户隔离（与图片/HTML同一套前缀校验逻辑）
+const COS_AUDIO_DIR = (process.env.COS_AUDIO_DIR || 'AudioRecords').replace(/\/+$/, '');
+
 const COS_TEMPLATE_KEY =
   process.env.COS_TEMPLATE_KEY || `${COS_JSON_DIR}/start.json`;
 
@@ -125,6 +128,7 @@ export default async function handler(req, res) {
     const allowed =
       keyMatchesUserPrefix(key, COS_IMG_DIR, user.id) ||
       keyMatchesUserPrefix(key, COS_HTML_DIR, user.id) ||
+      keyMatchesUserPrefix(key, COS_AUDIO_DIR, user.id) ||
       key === `${COS_JSON_DIR}/${safeUsername}.json` ||
       isTemplateRead;
 

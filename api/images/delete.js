@@ -5,6 +5,8 @@ const COS_BUCKET = process.env.COS_BUCKET || 'tappyreadjpeg-1325106148';
 const COS_REGION = process.env.COS_REGION || 'ap-guangzhou';
 const COS_IMG_DIR = (process.env.COS_IMG_DIR || 'jpeg').replace(/\/+$/, '');
 const COS_HTML_DIR = (process.env.COS_HTML_DIR || 'html').replace(/\/+$/, '');
+// 🆕 打卡跟读录音统一存储目录：AudioRecords/，按用户隔离，删除录音时复用同一个接口
+const COS_AUDIO_DIR = (process.env.COS_AUDIO_DIR || 'AudioRecords').replace(/\/+$/, '');
 const cosConfigured = Boolean(process.env.COS_SECRET_ID && process.env.COS_SECRET_KEY);
 const cosClient = cosConfigured
   ? new COS({ SecretId: process.env.COS_SECRET_ID, SecretKey: process.env.COS_SECRET_KEY })
@@ -68,7 +70,7 @@ export default async function handler(req, res) {
     // 之前的 200 上限对页数较多的绘本明显不够，也会导致删不干净。
     const safeKeys = keys
       .map(k => String(k || '').trim())
-      .filter(k => keyMatchesUserPrefix(k, COS_IMG_DIR, user.id) || keyMatchesUserPrefix(k, COS_HTML_DIR, user.id))
+      .filter(k => keyMatchesUserPrefix(k, COS_IMG_DIR, user.id) || keyMatchesUserPrefix(k, COS_HTML_DIR, user.id) || keyMatchesUserPrefix(k, COS_AUDIO_DIR, user.id))
       .slice(0, 2000);
     if (!safeKeys.length) return sendJson(res, 200, { ok: true, deleted: 0, skipped: keys.length });
     await deleteCosObjects(safeKeys);

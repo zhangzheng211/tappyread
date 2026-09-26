@@ -5,6 +5,8 @@ const COS_REGION = process.env.COS_REGION || 'ap-guangzhou';
 const COS_IMG_DIR = (process.env.COS_IMG_DIR || 'jpeg').replace(/\/+$/, '');
 const COS_HTML_DIR = (process.env.COS_HTML_DIR || 'html').replace(/\/+$/, '');
 const COS_JSON_DIR = (process.env.COS_JSON_DIR || 'json').replace(/\/+$/, '');
+// 🆕 打卡跟读录音统一存储目录：AudioRecords/，按用户隔离（与图片/HTML同一套前缀校验逻辑）
+const COS_AUDIO_DIR = (process.env.COS_AUDIO_DIR || 'AudioRecords').replace(/\/+$/, '');
 const COS_TEMPLATE_KEY = process.env.COS_TEMPLATE_KEY || `${COS_JSON_DIR}/start.json`;
 const cosConfigured = Boolean(process.env.COS_SECRET_ID && process.env.COS_SECRET_KEY);
 
@@ -45,7 +47,8 @@ export default async function handler(req, res) {
       userLibraryExists,
       templateKey: COS_TEMPLATE_KEY,
       imgDir: COS_IMG_DIR,
-      htmlDir: COS_HTML_DIR
+      htmlDir: COS_HTML_DIR,
+      audioDir: COS_AUDIO_DIR
     });
   } catch (error) {
     console.error('Vercel cos/config error:', error);
