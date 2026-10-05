@@ -621,8 +621,13 @@
         #grabTextOverlay .modal-box{ cursor:default; }
         #grabTextOverlay .modal-header{ cursor:move; user-select:none; }
         /* 🆕 打卡详情弹框同样支持拖动位置 */
-        #checkinModalOverlay .modal-box{ cursor:default; }
+        #checkinModalOverlay .modal-box{ cursor:default; pointer-events:auto; }
         #checkinModalOverlay .modal-header{ cursor:move; user-select:none; }
+        /* 🆕 打卡详情弹框不再遮罩/锁定阅读区：整个遮罩层背景透明且不拦截点击，
+           只有弹框本体（.modal-box）本身可交互，阅读区点读等操作可照常进行。
+           弹框始终置顶显示，直到用户点击右上角"✕"才会关闭。 */
+        #checkinModalOverlay{ background:transparent; pointer-events:none; align-items:flex-start; justify-content:flex-end; padding:70px 24px 24px; }
+        #checkinModalOverlay .modal-box{ box-shadow:0 14px 40px rgba(20,18,40,0.45); max-height:80vh; }
         .grab-copied-toast{
             position:fixed; left:50%; bottom:36px; transform:translateX(-50%);
             background:var(--tent-navy); color:#fff; padding:8px 18px; border-radius:999px;
@@ -5363,6 +5368,11 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
     const checkinModalOverlay = document.getElementById('checkinModalOverlay');
     const checkinModalBox = checkinModalOverlay.querySelector('.modal-box');
     const checkinModalHeader = checkinModalOverlay.querySelector('.modal-header');
+    // 🆕 把打卡详情弹框挪到 .stage-wrap 内部：浏览器原生全屏 API（requestFullscreen）
+    // 只会渲染被请求全屏的元素（.stage-wrap）自身的子树，弹框原本是 <body> 的直接子元素，
+    // 全屏时会彻底不可见。.stage-wrap 及其祖先都没有 transform/filter 等会改变
+    // position:fixed 定位基准的样式，所以挪动 DOM 位置不影响弹框原有的居中/拖动逻辑。
+    if(stageWrap) stageWrap.appendChild(checkinModalOverlay);
     const checkinUserLabel = document.getElementById('checkinUserLabel');
     const checkinDateLabel = document.getElementById('checkinDateLabel');
     const checkinRecordingsList = document.getElementById('checkinRecordingsList');
@@ -5540,16 +5550,28 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
     }
 
     function openCheckinModal(page, storyTitle, globalIndex, badge){
+        // 🆕 同一时间只允许打开一个"打卡详情"弹框：已经有一个在展示时，
+        // 再点别的页面的打卡图标要先提示用户关闭当前这个，而不是直接切换，
+        // 避免切换时正在录音的内容被静默丢弃。
+        if(checkinModalOverlay.classList.contains('open') && checkinCtx && checkinCtx.page !== page){
+            alert('已有打卡正在进行，请先结束当前打卡再重试');
+            return;
+        }
+        if(checkinModalOverlay.classList.contains('open') && checkinCtx && checkinCtx.page === page){
+            // 同一页再次点击：弹框已经在展示，直接忽略即可
+            return;
+        }
         checkinCtx = { page, storyTitle, globalIndex, badge };
         resetRecorderUI();
         renderCheckinModal();
-        checkinModalBox.style.transform = ''; // 每次打开都从居中位置开始，不记忆上次拖动的位置
+        checkinModalBox.style.transform = ''; // 每次打开都从默认位置开始，不记忆上次拖动的位置
         checkinModalOverlay.classList.add('open');
     }
 
     function closeCheckinModal(){
         stopCheckinPlayback();
         if(activeRecSession){
+            if(!confirm('当前还有一段录音未完成，关闭后这段录音将不会被保存，确定要关闭吗？')) return;
             cancelRecording();
         }
         checkinModalOverlay.classList.remove('open');
@@ -5723,7 +5745,8 @@ Biff and Chip.pdf         → 生成绘本"Biff and Chip"（不带数字前缀�
                     const pageLabel = '第' + (globalIndex + 1) + '页';
                     const dateLabel = formatCheckinDateTime().replace(/[\s:]/g, '');
                     const ext = extFromMimeType(blob.type);
-                    const fileBaseName = `${sanitizeNameForCos(storyTitle || 'story')}_${pageLabel}_${dateLabel}.${ext}`;
+                    // 🆕 命名规则：用户名 + 绘本名称 + 页码 + 日期
+                    const fileBaseName = `${sanitizeNameForCos(getCurrentCheckinUsername())}_${sanitizeNameForCos(storyTitle || 'story')}_${pageLabel}_${dateLabel}.${ext}`;
 
                     const result = await uploadAudioRecordingToCos(blob, fileBaseName, storyTitle);
                     checkinUploadingHint.style.display = 'none';
@@ -6970,6 +6993,7 @@ function createTextOverlay(container, text) {
         console.error('❌ createTextOverlay 执行失败:', error);
     }
 }
+
 
     // ============================================================
 // 🆕 单词释义功能（使用事件委托 + 与 HTML 页面样式一致）
