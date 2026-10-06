@@ -7224,11 +7224,12 @@ function hideWordCard() {
     nextBtn.disabled = currentSpread >= total - 1;
 
     if (autoSpeak) {
-        const items = [];
+        // 🆕 从绘本目录点击进入/切换页面时，默认只朗读左边这一页的内容，
+        // 不再自动接着朗读右页（右页需要用户主动点击图片或 🔊 按钮才会朗读）。
         const speakers = spreadEl.querySelectorAll('.mini-speaker');
-        if (leftPage && leftPage.text) items.push({ text: leftPage.text, indicatorEl: speakers[0] });
-        if (rightPage && rightPage.text) items.push({ text: rightPage.text, indicatorEl: speakers[1] });
-        speakSequence(items);
+        if (leftPage && leftPage.text) {
+        speakOne(leftPage.text, speakers[0]);
+        }
     }
 
     // ===== 🔧 修改：直接为当前页创建覆盖层 =====
